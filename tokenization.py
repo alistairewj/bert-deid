@@ -1,5 +1,6 @@
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
+# Copyright 2019 Alistair Johnson
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,9 +21,11 @@ import collections
 import logging
 import os
 import unicodedata
+import itertools
 from io import open
 
-from .file_utils import cached_path
+import numpy as np
+from pytorch_pretrained_bert.file_utils import cached_path
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,106 @@ def whitespace_tokenize(text):
     return tokens
 
 
+def whitespace_tokenize_offsets(text, offsets):
+    """Runs basic whitespace cleaning and splitting on a piece of text."""
+    N = len(text)
+    text = text.lstrip()
+    d = N - len(text)
+
+    offsets = offsets[d:]
+    text = text.rstrip()
+    d = N - len(text)
+    offsets = offsets[:-d]
+
+    if not text:
+        return [], []
+
+    # manually split text to keep track of offsets
+    tokens = []
+    offsets_new = []
+    i_start = 0
+    new_word = False
+    for i, c in enumerate(text):
+        if c == ' ':
+            if new_word:
+                continue
+            tokens.append(text[i_start:i])
+            offsets_new.append(offsets[i_start:i])
+            new_word = True
+        elif new_word:
+            i_start = i
+            new_word = False
+
+    return tokens, offsets_new
+
+
+def whitespace_tokenize_with_punc(text, offsets, never_split):
+    """Runs basic whitespace cleaning and splitting on a piece of text."""
+    N = len(text)
+    text = text.lstrip()
+    d = N - len(text)
+    offsets = offsets[d:]
+
+    text = text.rstrip()
+    offsets = offsets[:len(text)]
+
+    if not text:
+        return [], []
+
+    # manually split text to keep track of offsets
+    tokens = []
+    offsets_new = []
+    i_start = 0
+    new_word = False
+    for i, c in enumerate(text):
+        if c == ' ':
+            if new_word:
+                continue
+
+            # flag to tell future iterations to set i_start
+            new_word = True
+
+            word = text[i_start:i]
+            offset = offsets[i_start:i]
+            # check if we can split this token on punctuation
+            if word in never_split:
+                tokens.append(word)
+                offsets_new.append(offset)
+                continue
+            else:
+                j = 0
+                punc_words = []
+                punc_offsets = []
+
+                punc_new_word = True
+                while j < len(word):
+                    char = word[j]
+                    if _is_punctuation(char):
+                        punc_words.append([char])
+                        punc_offsets.append([offset[j]])
+                        punc_new_word = True
+                    else:
+                        if punc_new_word:
+                            # initialize empty lists
+                            punc_words.append([])
+                            punc_offsets.append([])
+                            punc_new_word = False
+                        punc_words[-1].append(char)
+                        punc_offsets[-1].append(offset[j])
+                    j += 1
+
+                # flatten strings within punc_words list
+                punc_words = ["".join(x) for x in punc_words]
+                tokens.extend(punc_words)
+                offsets_new.extend(punc_offsets)
+
+        elif new_word:
+            i_start = i
+            new_word = False
+
+    return tokens, offsets_new
+
+
 class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
 
@@ -99,19 +202,19 @@ class BertTokenizer(object):
             [(ids, tok) for tok, ids in self.vocab.items()])
         self.do_basic_tokenize = do_basic_tokenize
         if do_basic_tokenize:
-          self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case,
-                                                never_split=never_split)
+            self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case,
+                                                  never_split=never_split)
         self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab)
         self.max_len = max_len if max_len is not None else int(1e12)
 
     def tokenize(self, text):
         if self.do_basic_tokenize:
-          split_tokens = []
-          for token in self.basic_tokenizer.tokenize(text):
-              for sub_token in self.wordpiece_tokenizer.tokenize(token):
-                  split_tokens.append(sub_token)
+            split_tokens = []
+            for token in self.basic_tokenizer.tokenize(text):
+                for sub_token in self.wordpiece_tokenizer.tokenize(token):
+                    split_tokens.append(sub_token)
         else:
-          split_tokens = self.wordpiece_tokenizer.tokenize(text)
+            split_tokens = self.wordpiece_tokenizer.tokenize(text)
         return split_tokens
 
     def convert_tokens_to_ids(self, tokens):
@@ -123,7 +226,8 @@ class BertTokenizer(object):
             logger.warning(
                 "Token indices sequence length is longer than the specified maximum "
                 " sequence length for this BERT model ({} > {}). Running this"
-                " sequence through BERT will result in indexing errors".format(len(ids), self.max_len)
+                " sequence through BERT will result in indexing errors".format(
+                    len(ids), self.max_len)
             )
         return ids
 
@@ -173,6 +277,85 @@ class BertTokenizer(object):
         return tokenizer
 
 
+class BertTokenizerNER(BertTokenizer):
+    """
+    Runs end-to-end tokenization: punctuation splitting + wordpiece
+    Also output word piece boundary indices for mapping NER tags to tokens.
+    """
+
+    def __init__(self, vocab_file, do_lower_case=True, max_len=None, do_basic_tokenize=True,
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
+        """Constructs a BertTokenizerNER.
+
+        Args:
+          vocab_file: Path to a one-wordpiece-per-line vocabulary file
+          do_lower_case: Whether to lower case the input
+                         Only has an effect when do_wordpiece_only=False
+          do_basic_tokenize: Whether to do basic tokenization before wordpiece.
+          max_len: An artificial maximum length to truncate tokenized sequences to;
+                         Effective maximum length is always the minimum of this
+                         value (if specified) and the underlying BERT model's
+                         sequence length.
+          never_split: List of tokens which will never be split during tokenization.
+                         Only has an effect when do_wordpiece_only=False
+        """
+        super().__init__(vocab_file,
+                         do_lower_case=do_lower_case, max_len=max_len,
+                         do_basic_tokenize=do_basic_tokenize,
+                         never_split=never_split)
+
+    # overwrite the original tokenize with NER version tracking offsets
+    def tokenize(self, text):
+        """Segment each token into subwords while keeping track of
+        token boundaries.
+        Parameters
+        ----------
+        text: A single string to be tokenized.
+
+        Returns
+        -------
+        A tuple consisting of:
+            - A list of subwords
+            - A mask indicating the word is a subword
+            - An array of indices of the same length of the subwords,
+                indicating the start index of the token.
+        """
+        if self.do_basic_tokenize:
+            split_tokens = []
+            subword_offsets = []
+            subword_flags = []
+            tokens, offsets = self.basic_tokenizer.tokenize(text)
+            for token, offset in zip(tokens, offsets):
+                subword_flag = False
+                # keep track of length of each subword
+                for sub_token in self.wordpiece_tokenizer.tokenize(token):
+                    split_tokens.append(sub_token)
+                    # by definition only the first token is non-subword
+                    if subword_flag:
+                        # length, minus the prefix '##' for subwords
+                        subword_len = len(sub_token) - 2
+                        subword_flags.append(1)
+                    else:
+                        subword_len = len(sub_token)
+                        subword_flags.append(0)
+                    subword_offsets.append(subword_len)
+                    # all subsequent sub_tokens are parts of a single word
+                    subword_flag = True
+
+        else:
+            split_tokens = self.wordpiece_tokenizer.tokenize(text)
+            subword_offsets = [len(x) - 2 for x in split_tokens]
+            subword_flags = [1]*len(split_tokens)
+            # only the first item is non-subword
+            subword_offsets[0] = subword_offsets[0] + 2
+            subword_flags[0] = 0
+
+            # cumulatively sum to get offsets of each subword
+            subword_offsets = [0] + \
+                [x for x in itertools.accumulate(subword_offsets[:-1])]
+        return split_tokens, subword_flags, subword_offsets
+
+
 class BasicTokenizer(object):
     """Runs basic tokenization (punctuation splitting, lower casing, etc.)."""
 
@@ -189,24 +372,24 @@ class BasicTokenizer(object):
 
     def tokenize(self, text):
         """Tokenizes a piece of text."""
-        text = self._clean_text(text)
+        text, offsets = self._clean_text(text)
         # This was added on November 1st, 2018 for the multilingual and Chinese
         # models. This is also applied to the English models now, but it doesn't
         # matter since the English models were not trained on any Chinese data
         # and generally don't have any Chinese data in them (there are Chinese
         # characters in the vocabulary because Wikipedia does have some Chinese
         # words in the English Wikipedia.).
-        text = self._tokenize_chinese_chars(text)
-        orig_tokens = whitespace_tokenize(text)
-        split_tokens = []
-        for token in orig_tokens:
-            if self.do_lower_case and token not in self.never_split:
-                token = token.lower()
-                token = self._run_strip_accents(token)
-            split_tokens.extend(self._run_split_on_punc(token))
+        text, offsets = self._tokenize_chinese_chars(text, offsets)
+        orig_tokens, offsets = whitespace_tokenize_with_punc(
+            text, offsets, self.never_split)
 
-        output_tokens = whitespace_tokenize(" ".join(split_tokens))
-        return output_tokens
+        if self.do_lower_case:
+            orig_tokens = [self._run_strip_accents(token.lower())
+                           if token not in self.never_split
+                           else token
+                           for token in orig_tokens]
+
+        return orig_tokens, offsets
 
     def _run_strip_accents(self, text):
         """Strips accents from a piece of text."""
@@ -241,18 +424,21 @@ class BasicTokenizer(object):
 
         return ["".join(x) for x in output]
 
-    def _tokenize_chinese_chars(self, text):
+    def _tokenize_chinese_chars(self, text, offsets):
         """Adds whitespace around any CJK character."""
         output = []
-        for char in text:
+        offsets_new = []
+        for i, char in enumerate(text):
             cp = ord(char)
             if self._is_chinese_char(cp):
                 output.append(" ")
                 output.append(char)
                 output.append(" ")
+                offsets_new.extend([-1, offsets[i], -1])
             else:
                 output.append(char)
-        return "".join(output)
+                offsets_new.append(offsets[i])
+        return "".join(output), offsets_new
 
     def _is_chinese_char(self, cp):
         """Checks whether CP is the codepoint of a CJK character."""
@@ -279,15 +465,22 @@ class BasicTokenizer(object):
     def _clean_text(self, text):
         """Performs invalid character removal and whitespace cleanup on text."""
         output = []
-        for char in text:
+        N = len(text)
+        mask = np.ones(N, dtype=bool)
+
+        for i, char in enumerate(text):
             cp = ord(char)
             if cp == 0 or cp == 0xfffd or _is_control(char):
+                mask[i] = False
                 continue
             if _is_whitespace(char):
                 output.append(" ")
             else:
                 output.append(char)
-        return "".join(output)
+
+        # convert mask to character level offsets
+        offsets = [i for i in range(N) if mask[i]]
+        return "".join(output), offsets
 
 
 class WordpieceTokenizer(object):
