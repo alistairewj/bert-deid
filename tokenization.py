@@ -107,6 +107,38 @@ def whitespace_tokenize_offsets(text, offsets):
     return tokens, offsets_new
 
 
+def tokenize_punctuation(word, offset):
+    """
+    Split a string into a list of sub-tokens based on punctuation.
+    Retain offsets.
+    """
+
+    j = 0
+    punc_words = []
+    punc_offsets = []
+
+    punc_new_word = True
+    while j < len(word):
+        char = word[j]
+        if _is_punctuation(char):
+            punc_words.append([char])
+            punc_offsets.append([offset[j]])
+            punc_new_word = True
+        else:
+            if punc_new_word:
+                # initialize empty lists
+                punc_words.append([])
+                punc_offsets.append([])
+                punc_new_word = False
+            punc_words[-1].append(char)
+            punc_offsets[-1].append(offset[j])
+        j += 1
+
+    # flatten strings within punc_words list
+    punc_words = ["".join(x) for x in punc_words]
+    return punc_words, punc_offsets
+
+
 def whitespace_tokenize_with_punc(text, offsets, never_split):
     """Runs basic whitespace cleaning and splitting on a piece of text."""
     N = len(text)
@@ -141,35 +173,27 @@ def whitespace_tokenize_with_punc(text, offsets, never_split):
                 offsets_new.append(offset)
                 continue
             else:
-                j = 0
-                punc_words = []
-                punc_offsets = []
-
-                punc_new_word = True
-                while j < len(word):
-                    char = word[j]
-                    if _is_punctuation(char):
-                        punc_words.append([char])
-                        punc_offsets.append([offset[j]])
-                        punc_new_word = True
-                    else:
-                        if punc_new_word:
-                            # initialize empty lists
-                            punc_words.append([])
-                            punc_offsets.append([])
-                            punc_new_word = False
-                        punc_words[-1].append(char)
-                        punc_offsets[-1].append(offset[j])
-                    j += 1
-
-                # flatten strings within punc_words list
-                punc_words = ["".join(x) for x in punc_words]
+                punc_words, punc_offsets = tokenize_punctuation(word, offset)
                 tokens.extend(punc_words)
                 offsets_new.extend(punc_offsets)
 
         elif new_word:
             i_start = i
             new_word = False
+
+    # include final word in sentence
+    if c != ' ':
+        word = text[i_start:i]
+        offset = offsets[i_start:i]
+
+        # check if we can split this token on punctuation
+        if word in never_split:
+            tokens.append(word)
+            offsets_new.append(offset)
+        else:
+            punc_words, punc_offsets = tokenize_punctuation(word, offset)
+            tokens.extend(punc_words)
+            offsets_new.extend(punc_offsets)
 
     return tokens, offsets_new
 
