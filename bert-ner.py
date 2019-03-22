@@ -585,15 +585,21 @@ def main():
         output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
         with open(output_config_file, 'w') as f:
             f.write(model_to_save.config.to_json_string())
-
-        # Load a trained model and config that you have fine-tuned
-        config = BertConfig(output_config_file)
-        model = BertForTokenClassification(config, num_labels=num_labels)
-        model.load_state_dict(torch.load(output_model_file))
     else:
-        model = BertForTokenClassification.from_pretrained(
-            args.bert_model, num_labels=num_labels)
-    model.to(device)
+        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
+        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+        if os.path.exists(output_model_file) & os.path.exists(output_config_file):
+            # Load a trained model and config that you have fine-tuned
+            config = BertConfig(output_config_file)
+            model = BertForTokenClassification(config, num_labels=num_labels)
+            model.load_state_dict(torch.load(output_model_file))
+        else:
+            print('No trained model/config found in output_dir.')
+            print('Using pretrained BERT model with random classification weights.')
+            model = BertForTokenClassification.from_pretrained(
+                args.bert_model, num_labels=num_labels)
+
+        model.to(device)
 
     if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         eval_examples = processor.get_dev_examples(args.data_dir)
