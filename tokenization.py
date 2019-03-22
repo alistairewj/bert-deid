@@ -327,6 +327,7 @@ class BertTokenizerNER(BertTokenizer):
             tokens, offsets = self.basic_tokenizer.tokenize(text)
             for token, offset in zip(tokens, offsets):
                 subword_flag = False
+                i = 0
                 # keep track of length of each subword
                 for sub_token in self.wordpiece_tokenizer.tokenize(token):
                     split_tokens.append(sub_token)
@@ -338,7 +339,10 @@ class BertTokenizerNER(BertTokenizer):
                     else:
                         subword_len = len(sub_token)
                         subword_flags.append(0)
-                    subword_offsets.append(subword_len)
+
+                    subword_offsets.append(offset[i:i+subword_len])
+                    i += subword_len
+
                     # all subsequent sub_tokens are parts of a single word
                     subword_flag = True
 
