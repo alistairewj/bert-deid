@@ -590,6 +590,7 @@ def main():
         output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
         if os.path.exists(output_model_file) & os.path.exists(output_config_file):
             # Load a trained model and config that you have fine-tuned
+            print(f'Loading model and configuration from {args.output_dir}.')
             config = BertConfig(output_config_file)
             model = BertForTokenClassification(config, num_labels=num_labels)
             model.load_state_dict(torch.load(output_model_file))
