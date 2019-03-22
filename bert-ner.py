@@ -139,7 +139,9 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return [0, 1]
+        return ['None', 'Other',
+                'Date', 'Age', 'Name',
+                'Identifier', 'Contact', 'Protected_Entity']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -201,21 +203,24 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         # example.label is a list of start/stop offsets for tagged entities
         # use this to create list of labels for each token
         # assumes labels are ordered
-        labels = [0] * len(input_ids)
+        labels = ['None'] * len(input_ids)
         if len(example.label) > 0:
             l_idx = 0
-            start, stop = example.label[l_idx]
+            start, stop, entity = example.label[l_idx]
             for i, idx in enumerate(indices):
                 if idx[0] >= stop:
                     l_idx += 1
                     # exit loop if we have finished assigning labels
                     if l_idx >= len(example.label):
                         break
-                    start, stop = example.label[l_idx]
+                    start, stop, entity = example.label[l_idx]
                     continue
 
                 if (idx[0] >= start) & (idx[0] < stop):
-                    labels[i] = 1
+                    labels[i] = entity
+
+        # convert from text labels to integer coding
+        label_ids = [label_map[x] for x in labels]
 
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
         # tokens are attended to.
@@ -226,14 +231,13 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         input_ids += padding
         input_mask += padding
         segment_ids += padding
-        labels += padding
+        label_ids += padding
 
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
-        assert len(labels) == max_seq_length
+        assert len(label_ids) == max_seq_length
 
-        label_ids = [label_map[x] for x in labels]
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
@@ -385,7 +389,7 @@ def main():
     }
 
     num_labels_task = {
-        "deid": 2
+        "deid": 8
     }
 
     if args.local_rank == -1 or args.no_cuda:
