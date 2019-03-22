@@ -1,2 +1,3 @@
 # bert-deid
-deidentify patient notes using pre-trained BERT
+
+Code to fine-tune BERT on a medical note de-identification task.
