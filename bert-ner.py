@@ -168,23 +168,11 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize(
             example.text_a)
 
-        tokens_b = None
-        if example.text_b:
-            tokens_a, tokens_b_sw, tokens_b_idx = tokenizer.tokenize(
-                example.text_b)
-            # Modifies `tokens_a` and `tokens_b` in place so that the total
-            # length is less than the specified length.
-            # Account for [CLS], [SEP], [SEP] with "- 3"
-            _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
-            _truncate_seq_pair(tokens_a_sw, tokens_b_sw,
-                               max_seq_length - 3)
-            _truncate_seq_pair(tokens_a_idx, tokens_b_idx, max_seq_length - 3)
-        else:
-            # Account for [CLS] and [SEP] with "- 2"
-            if len(tokens_a) > max_seq_length - 2:
-                tokens_a = tokens_a[:(max_seq_length - 2)]
-                tokens_a_sw = tokens_a_sw[:(max_seq_length - 2)]
-                tokens_a_idx = tokens_a_idx[:(max_seq_length - 2)]
+        # Account for [CLS] and [SEP] with "- 2"
+        if len(tokens_a) > max_seq_length - 2:
+            tokens_a = tokens_a[:(max_seq_length - 2)]
+            tokens_a_sw = tokens_a_sw[:(max_seq_length - 2)]
+            tokens_a_idx = tokens_a_idx[:(max_seq_length - 2)]
 
         # The convention in BERT is:
         # (a) For sequence pairs:
@@ -207,11 +195,6 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
         indices = [[-1]] + tokens_a_idx + [[-1]]
         segment_ids = [0] * len(tokens)
-
-        if tokens_b:
-            tokens += tokens_b + ["[SEP]"]
-            indices += tokens_b_idx + [[-1]]
-            segment_ids += [1] * (len(tokens_b) + 1)
 
         input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
