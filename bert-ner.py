@@ -139,8 +139,7 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['None', 'Other',
-                'Date', 'Age', 'Name',
+        return ['X', 'Other', 'Date', 'Age', 'Name',
                 'Identifier', 'Contact', 'Protected_Entity']
 
     def _create_examples(self, lines, set_type):
@@ -158,6 +157,67 @@ class DeidProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, label=label))
         return examples
 
+
+class CoNLLProcessor(DataProcessor):
+    """Processor for the gold standard de-id data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(
+            os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ['B-LOC', 'B-MISC', 'B-ORG', 'B-PER',
+                'I-LOC', 'I-MISC', 'I-ORG', 'I-PER',
+                'O', 'X']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        sentence = []
+        label = []
+        guid = "%s-%d" % (set_type, 2)
+        for (i, line) in enumerate(lines):
+            if len(line) == 0:
+                if len(sentence) == 0:
+                    continue
+                # end of sentence
+
+                # reformat labels to be a list of anns: [start, stop, entity]
+                # e.g. [[0, 2, 'O'], [2, 6, 'ORG], ...]
+                sentence_len = [len(x) for x in sentence]
+                label_offsets = []
+                s_len = 0
+                for j, l in enumerate(sentence):
+                    label_offsets.append([s_len, s_len+len(l), label[j]])
+                    # +1 to account for the whitespaces we insert below
+                    s_len += len(l) + 1
+
+                # create a single string for the sentence
+                sentence = ' '.join(sentence)
+                examples.append(
+                    InputExample(guid=guid, text_a=sentence, label=label_offsets))
+                sentence = []
+                label = []
+                guid = "%s-%s" % (set_type, i+1)
+                continue
+
+            line = line[0]
+            if line.startswith('-DOCSTART-'):
+                continue
+
+            text = line.split(' ')
+            sentence.append(text[0])
+            label.append(text[3])
+        return examples
 
 def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
     """Loads a data file into a list of `InputBatch`s."""
@@ -203,7 +263,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         # example.label is a list of start/stop offsets for tagged entities
         # use this to create list of labels for each token
         # assumes labels are ordered
-        labels = ['None'] * len(input_ids)
+        labels = ['X'] * len(input_ids)
         if len(example.label) > 0:
             l_idx = 0
             start, stop, entity = example.label[l_idx]
@@ -214,9 +274,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                     if l_idx >= len(example.label):
                         break
                     start, stop, entity = example.label[l_idx]
-                    continue
 
                 if (idx[0] >= start) & (idx[0] < stop):
+                    # tokens are assigned based on label of first character
                     labels[i] = entity
 
         # convert from text labels to integer coding
@@ -385,11 +445,13 @@ def main():
         ptvsd.wait_for_attach()
 
     processors = {
-        "deid": DeidProcessor
+        "deid": DeidProcessor,
+        "conll": CoNLLProcessor
     }
 
     num_labels_task = {
-        "deid": 8
+        "deid": 8,
+        "conll": 10
     }
 
     if args.local_rank == -1 or args.no_cuda:
