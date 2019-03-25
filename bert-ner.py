@@ -302,6 +302,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         # used as as the "sentence vector". Note that this only makes sense because
         # the entire model is fine-tuned.
         tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
+        tokens_sw = [0] + tokens_a_sw + [0]
         indices = [[-1]] + tokens_a_idx + [[-1]]
         segment_ids = [0] * len(tokens)
 
@@ -333,6 +334,11 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                      if x in label_map
                      else -1
                      for x in labels]
+
+        # set labels for subwords to -1 to ignore them in label loss
+        label_ids = [-1 if tokens_sw[i] == 1
+                     else label_id
+                     for i, label_id in enumerate(label_ids)]
 
         # The mask has 1 for real tokens and 0 for padding tokens.
         input_mask = [1] * len(input_ids)
