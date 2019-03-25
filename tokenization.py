@@ -183,8 +183,8 @@ def whitespace_tokenize_with_punc(text, offsets, never_split):
 
     # include final word in sentence
     if c != ' ':
-        word = text[i_start:i]
-        offset = offsets[i_start:i]
+        word = text[i_start:]
+        offset = offsets[i_start:]
 
         # check if we can split this token on punctuation
         if word in never_split:
