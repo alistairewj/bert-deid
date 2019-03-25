@@ -31,6 +31,8 @@ import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
+from torch.nn import CrossEntropyLoss
+
 from tqdm import tqdm, trange
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
@@ -50,6 +52,39 @@ logger = logging.getLogger(__name__)
 def segment_ids(self, segment1_len, segment2_len):
     ids = [0] * segment1_len + [1] * segment2_len
     return torch.tensor([ids]).to(device=self.device)
+
+
+class BertForNER(BertForTokenClassification):
+    """BERT model for neural entity recognition.
+    Essentially identical to BertForTokenClassification, but ignores
+    labels with an index of -1 in the loss function.
+    """
+
+    def __init__(self, config, num_labels):
+        super(BertForNER, self).__init__(config, num_labels)
+
+    def forward(self, input_ids,
+                token_type_ids=None, attention_mask=None, labels=None):
+        sequence_output, _ = self.bert(
+            input_ids, token_type_ids, attention_mask,
+            output_all_encoded_layers=False)
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss(ignore_index=-1)
+            # Only keep active parts of the loss
+            if attention_mask is not None:
+                active_loss = attention_mask.view(-1) == 1
+                active_logits = logits.view(-1, self.num_labels)[active_loss]
+                active_labels = labels.view(-1)[active_loss]
+                loss = loss_fct(active_logits, active_labels)
+            else:
+                loss = loss_fct(
+                    logits.view(-1, self.num_labels), labels.view(-1))
+            return loss
+        else:
+            return logits
 
 
 class InputExample(object):
@@ -174,7 +209,7 @@ class CoNLLProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['LOC', 'MISC', 'ORG', 'PER', 'O', 'X']
+        return ['LOC', 'MISC', 'ORG', 'PER', 'O']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -289,10 +324,14 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                     labels[i] = entity
 
         # convert from text labels to integer coding
-        label_ids = [label_map[x] for x in labels]
+        labels[0] = "[CLS]"
+        labels[-1] = "[SEP]"
+        label_ids = [label_map[x]
+                     if x in label_map
+                     else -1
+                     for x in labels]
 
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
+        # The mask has 1 for real tokens and 0 for padding tokens.
         input_mask = [1] * len(input_ids)
 
         # Zero-pad up to the sequence length.
@@ -464,7 +503,7 @@ def main():
 
     num_labels_task = {
         "deid": 8,
-        "conll": 6
+        "conll": 5
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -528,9 +567,9 @@ def main():
     # Prepare model
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(
         str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
-    model = BertForTokenClassification.from_pretrained(args.bert_model,
-                                                       cache_dir=cache_dir,
-                                                       num_labels=num_labels)
+    model = BertForNER.from_pretrained(args.bert_model,
+                                       cache_dir=cache_dir,
+                                       num_labels=num_labels)
     if args.fp16:
         model.half()
     model.to(device)
@@ -666,12 +705,12 @@ def main():
             # Load a trained model and config that you have fine-tuned
             print(f'Loading model and configuration from {args.output_dir}.')
             config = BertConfig(output_config_file)
-            model = BertForTokenClassification(config, num_labels=num_labels)
+            model = BertForNER(config, num_labels=num_labels)
             model.load_state_dict(torch.load(output_model_file))
         else:
             print('No trained model/config found in output_dir.')
             print('Using pretrained BERT model with random classification weights.')
-            model = BertForTokenClassification.from_pretrained(
+            model = BertForNER.from_pretrained(
                 args.bert_model, num_labels=num_labels)
 
         model.to(device)
