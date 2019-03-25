@@ -174,7 +174,7 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['X', 'Other', 'Date', 'Age', 'Name',
+        return ['Other', 'Date', 'Age', 'Name',
                 'Identifier', 'Contact', 'Protected_Entity']
 
     def _create_examples(self, lines, set_type):
@@ -517,7 +517,7 @@ def main():
     }
 
     num_labels_task = {
-        "deid": 8,
+        "deid": 7,
         "conll": 11
     }
 
