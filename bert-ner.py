@@ -778,7 +778,7 @@ def main():
 
             logits = logits.detach().cpu().numpy()
             label_ids = label_ids.to('cpu').numpy()
-            idx = (input_mask.to('cpu').numpy() == 1)
+            idx = (input_mask.to('cpu').numpy() == 1) & (label_ids != -1)
             yhat = np.argmax(logits, axis=-1)
 
             # add this batch to the y_true/y_pred lists
@@ -801,14 +801,14 @@ def main():
             # calculate running total for true positives, false positives, etc.
             for lbl in label_map:
                 lbl_id = label_map[lbl]
-                tp[lbl] += ((yhat == lbl_id) &
-                            (label_ids == lbl_id) & idx).sum()
-                fp[lbl] += ((yhat == lbl_id) &
-                            (label_ids != lbl_id) & idx).sum()
-                tn[lbl] += ((yhat != lbl_id) &
-                            (label_ids != lbl_id) & idx).sum()
-                fn[lbl] += ((yhat != lbl_id) &
-                            (label_ids == lbl_id) & idx).sum()
+                tp[lbl] += (idx &
+                            (yhat == lbl_id) & (label_ids == lbl_id)).sum()
+                fp[lbl] += (idx &
+                            (yhat == lbl_id) & (label_ids != lbl_id)).sum()
+                tn[lbl] += (idx &
+                            (yhat != lbl_id) & (label_ids != lbl_id)).sum()
+                fn[lbl] += (idx &
+                            (yhat != lbl_id) & (label_ids == lbl_id)).sum()
                 n_samples[lbl] += ((label_ids == lbl_id) & idx).sum()
 
             eval_loss += tmp_eval_loss.mean().item()
