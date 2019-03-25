@@ -785,22 +785,24 @@ def main():
             idx = (input_mask.to('cpu').numpy() == 1)
             yhat = np.argmax(logits, axis=-1)
 
+            # add this batch to the y_true/y_pred lists
             for j in range(yhat.shape[0]):
                 yhat_row = yhat[j, :]
                 y_row = label_ids[j, :]
                 y_true.append([label_id_map[y]
-                                for i, y in enumerate(y_row)
-                                if idx[j, i] & (y_row[i] != -1)])
+                               for i, y in enumerate(y_row)
+                               if idx[j, i] & (y_row[i] != -1)])
                 y_pred.append([label_id_map[y]
-                                for i, y in enumerate(yhat_row)
-                                if idx[j, i] & (y_row[i] != -1)])
-                
+                               for i, y in enumerate(yhat_row)
+                               if idx[j, i] & (y_row[i] != -1)])
+
                 # remove [CLS] and [SEP] tags
                 y_pred[-1] = [x for i, x in enumerate(y_pred[-1])
-                            if y_true[-1][i] not in ("[CLS]", "[SEP]")]
+                              if y_true[-1][i] not in ("[CLS]", "[SEP]")]
                 y_true[-1] = [x for i, x in enumerate(y_true[-1])
-                            if y_true[-1][i] not in ("[CLS]", "[SEP]")]
-                
+                              if y_true[-1][i] not in ("[CLS]", "[SEP]")]
+
+            # calculate running total for true positives, false positives, etc.
             for lbl in label_map:
                 lbl_id = label_map[lbl]
                 tp[lbl] += ((yhat == lbl_id) &
@@ -826,7 +828,6 @@ def main():
                   'loss': loss}
 
         # append label-wise metrics
-        report = classification_report(y_true, y_pred, digits=4)
         stats = {}
         stats['f1'], stats['se'], stats['p+'] = {}, {}, {}
 
@@ -843,20 +844,23 @@ def main():
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
-            # print out classification report
-            logger.info('{:10s} {:10s} {:10s} {:10s} {:10s}'.format(
-                    '', 'ppv', 'sens', 'f1', 'num'
-                ))
-            for lbl in label_map:
-                lbl_id = label_map[lbl]
-                logger.info('{:10s} {:10.4f} {:10.4f} {:10.4f} {:10d}'.format(
-                    lbl,
-                    stats['p+'][lbl], stats['se'][lbl], stats['f1'][lbl],
-                    n_samples[lbl]
-                ))
-            logger.info("classification report")
-            logger.info("\n%s", report)
 
+        # print out stats from running tallies
+        logger.info('{:10s} {:10s} {:10s} {:10s} {:10s}'.format(
+            '', 'ppv', 'sens', 'f1', 'num'
+        ))
+        for lbl in label_map:
+            lbl_id = label_map[lbl]
+            logger.info('{:10s} {:10.4f} {:10.4f} {:10.4f} {:10d}'.format(
+                lbl,
+                stats['p+'][lbl], stats['se'][lbl], stats['f1'][lbl],
+                n_samples[lbl]
+            ))
+
+        # print out stats from seqeval package
+        report = classification_report(y_true, y_pred, digits=4)
+        logger.info("classification report")
+        logger.info("\n%s", report)
 
 
 if __name__ == "__main__":
