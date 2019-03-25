@@ -37,8 +37,6 @@ from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling import BertForTokenClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
-from seqeval.metrics import classification_report
-
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
 from tokenization import BertTokenizerNER
@@ -728,8 +726,8 @@ def main():
             label_ids = label_ids.to('cpu').numpy()
             idx = (input_mask.to('cpu').numpy() == 1)
             yhat = np.argmax(logits, axis=-1)
-            for lbl_id in label_map:
-                lbl = label_map[lbl_id]
+            for lbl in label_map:
+                lbl_id = label_map[lbl]
                 tp[lbl] += ((yhat == lbl_id) &
                             (label_ids == lbl_id) & idx).sum()
                 fp[lbl] += ((yhat == lbl_id) &
@@ -753,8 +751,8 @@ def main():
                   'loss': loss}
 
         # append label-wise metrics
-        for lbl_id in label_map:
-            lbl = label_map[lbl_id]
+        for lbl in label_map:
+            lbl_id = label_map[lbl]
             f1 = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
             result[lbl + '_f1'] = f1
 
