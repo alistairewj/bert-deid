@@ -516,10 +516,9 @@ def main():
         "conll": CoNLLProcessor
     }
 
-    num_labels_task = {
-        "deid": 7,
-        "conll": 11
-    }
+    num_labels_task = {}
+    for p in processors:
+        num_labels_task[p] = len(p.get_labels())
 
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device(
