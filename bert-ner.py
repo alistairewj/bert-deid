@@ -701,7 +701,7 @@ def main():
             eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
         model.eval()
-        eval_loss, eval_accuracy = 0, 0
+        eval_loss = 0
         nb_eval_steps, nb_eval_examples = 0, 0
 
         # create result dictionaries for all labels
