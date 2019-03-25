@@ -161,6 +161,17 @@ class DeidProcessor(DataProcessor):
 class CoNLLProcessor(DataProcessor):
     """Processor for the gold standard de-id data set."""
 
+    combine_labels = {'B-LOC': 'LOC',
+    'B-MISC': 'MISC',
+    'B-ORG': 'ORG',
+    'B-PER': 'PER',
+    'I-LOC': 'LOC',
+    'I-MISC': 'MISC',
+    'I-ORG': 'ORG',
+    'I-PER': 'PER',
+    'O': 'O',
+    'X': 'X'}
+
     def get_train_examples(self, data_dir):
         """See base class."""
         logger.info("LOOKING AT {}".format(
@@ -175,9 +186,7 @@ class CoNLLProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['B-LOC', 'B-MISC', 'B-ORG', 'B-PER',
-                'I-LOC', 'I-MISC', 'I-ORG', 'I-PER',
-                'O', 'X']
+        return ['LOC', 'MISC', 'ORG', 'PER', 'O', 'X']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -197,7 +206,7 @@ class CoNLLProcessor(DataProcessor):
                 label_offsets = []
                 s_len = 0
                 for j, l in enumerate(sentence):
-                    label_offsets.append([s_len, s_len+len(l), label[j]])
+                    label_offsets.append([s_len, s_len+len(l), combine_labels[label[j]]])
                     # +1 to account for the whitespaces we insert below
                     s_len += len(l) + 1
 
@@ -338,7 +347,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def accuracy(out, labels):
-    outputs = np.argmax(out, axis=1)
+    outputs = np.argmax(out, axis=-1)
     return np.sum(outputs == labels)
 
 
@@ -451,7 +460,7 @@ def main():
 
     num_labels_task = {
         "deid": 8,
-        "conll": 10
+        "conll": 6
     }
 
     if args.local_rank == -1 or args.no_cuda:
