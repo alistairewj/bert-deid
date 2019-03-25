@@ -607,6 +607,9 @@ def main():
     if args.finetune:
         param_optimizer = [(n, p) for n, p in param_optimizer
                            if not n.startswith('bert.')]
+        logger.info(("Only training classification layers "
+                     "({} modules, {} parameters).").format(
+            len(param_optimizer), sum([len(p) for n, p in param_optimizer])))
 
     optimizer_grouped_parameters = [
         {'params': [p for n, p in param_optimizer if not any(
