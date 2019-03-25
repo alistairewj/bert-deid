@@ -174,7 +174,7 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['Other', 'Date', 'Age', 'Name',
+        return ['None', 'Other', 'Date', 'Age', 'Name',
                 'Identifier', 'Contact', 'Protected_Entity']
 
     def _create_examples(self, lines, set_type):
@@ -317,7 +317,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         # example.label is a list of start/stop offsets for tagged entities
         # use this to create list of labels for each token
         # assumes labels are ordered
-        labels = ['X'] * len(input_ids)
+        labels = ['None'] * len(input_ids)
         if len(example.label) > 0:
             l_idx = 0
             start, stop, entity = example.label[l_idx]
@@ -334,6 +334,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                     labels[i] = entity
 
         # convert from text labels to integer coding
+        # if a label is not in the map, we ignore that token in backprop
         labels[0] = "[CLS]"
         labels[-1] = "[SEP]"
         label_ids = [label_map[x]
