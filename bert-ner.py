@@ -518,7 +518,7 @@ def main():
 
     num_labels_task = {}
     for p in processors:
-        num_labels_task[p] = len(p.get_labels())
+        num_labels_task[p] = len(processors[p].get_labels())
 
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device(
