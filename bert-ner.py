@@ -174,8 +174,8 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['None', 'Other', 'Date', 'Age', 'Name',
-                'Identifier', 'Contact', 'Protected_Entity']
+        return ['Other', 'Date', 'Age', 'Name', 'Identifier',
+                'Contact', 'Protected_Entity']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
