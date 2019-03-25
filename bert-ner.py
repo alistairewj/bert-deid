@@ -37,6 +37,7 @@ from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling import BertForTokenClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
+from seqeval.metrics import classification_report
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
@@ -703,6 +704,15 @@ def main():
         eval_loss, eval_accuracy = 0, 0
         nb_eval_steps, nb_eval_examples = 0, 0
 
+        # create result dictionaries for all labels
+        label_list = processor.get_labels()
+        label_map = {label: i for i, label in enumerate(label_list)}
+        tp = {x: 0 for x in label_map}
+        fp = {x: 0 for x in label_map}
+        tn = {x: 0 for x in label_map}
+        fn = {x: 0 for x in label_map}
+        n_samples = {x: 0 for x in label_map}
+
         for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
@@ -716,21 +726,37 @@ def main():
 
             logits = logits.detach().cpu().numpy()
             label_ids = label_ids.to('cpu').numpy()
-            tmp_eval_accuracy = accuracy(logits, label_ids)
+            idx = (input_mask.to('cpu').numpy() == 1)
+            yhat = np.argmax(logits, axis=-1)
+            for lbl_id in label_map:
+                lbl = label_map[lbl_id]
+                tp[lbl] += ((yhat == lbl_id) &
+                            (label_ids == lbl_id) & idx).sum()
+                fp[lbl] += ((yhat == lbl_id) &
+                            (label_ids != lbl_id) & idx).sum()
+                tn[lbl] += ((yhat != lbl_id) &
+                            (label_ids != lbl_id) & idx).sum()
+                fn[lbl] += ((yhat != lbl_id) &
+                            (label_ids == lbl_id) & idx).sum()
+                n_samples[lbl] += idx.sum()
 
             eval_loss += tmp_eval_loss.mean().item()
-            eval_accuracy += tmp_eval_accuracy
 
             nb_eval_examples += input_ids.size(0)
             nb_eval_steps += 1
 
         eval_loss = eval_loss / nb_eval_steps
-        eval_accuracy = eval_accuracy / nb_eval_examples
         loss = tr_loss/nb_tr_steps if args.do_train else None
+
         result = {'eval_loss': eval_loss,
-                  'eval_accuracy': eval_accuracy,
                   'global_step': global_step,
                   'loss': loss}
+
+        # append label-wise metrics
+        for lbl_id in label_map:
+            lbl = label_map[lbl_id]
+            f1 = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
+            result[lbl + '_f1'] = f1
 
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
