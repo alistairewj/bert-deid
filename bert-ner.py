@@ -789,7 +789,7 @@ def main():
                             (label_ids != lbl_id) & idx).sum()
                 fn[lbl] += ((yhat != lbl_id) &
                             (label_ids == lbl_id) & idx).sum()
-                n_samples[lbl] += idx.sum()
+                n_samples[lbl] += ((label_ids == lbl_id) & idx).sum()
 
             eval_loss += tmp_eval_loss.mean().item()
 
@@ -804,10 +804,15 @@ def main():
                   'loss': loss}
 
         # append label-wise metrics
+        stats = {}
+        stats['f1'], stats['se'], stats['p+'] = {}, {}, {}
+
         for lbl in label_map:
             lbl_id = label_map[lbl]
-            f1 = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
-            result[lbl + '_f1'] = f1
+            stats['se'][lbl] = tp[lbl]/(tp[lbl] + fn[lbl])
+            stats['p+'][lbl] = tp[lbl]/(tp[lbl] + fp[lbl])
+            stats['f1'][lbl] = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
+            result[lbl + '_f1'] = stats['f1'][lbl]
 
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -815,6 +820,18 @@ def main():
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+            # print out classification report
+            logger.info('{:10s} {:10s} {:10s} {:10s} {:10s}'.format(
+                    '', 'ppv', 'sens', 'f1', 'num'
+                ))
+            for lbl in label_map:
+                lbl_id = label_map[lbl]
+                logger.info('{:10s} {:10.4f} {:10.4f} {:10.4f} {:10d}'.format(
+                    lbl,
+                    stats['p+'][lbl], stats['se'][lbl], stats['f1'][lbl],
+                    n_samples[lbl]
+                ))
+
 
 
 if __name__ == "__main__":
