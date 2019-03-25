@@ -33,6 +33,7 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn import CrossEntropyLoss
 
+from seqeval.metrics import classification_report
 from tqdm import tqdm, trange
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
@@ -758,11 +759,15 @@ def main():
         # create result dictionaries for all labels
         label_list = processor.get_labels()
         label_map = {label: i for i, label in enumerate(label_list)}
+        label_id_map = {i: label for i, label in enumerate(label_list)}
         tp = {x: 0 for x in label_map}
         fp = {x: 0 for x in label_map}
         tn = {x: 0 for x in label_map}
         fn = {x: 0 for x in label_map}
         n_samples = {x: 0 for x in label_map}
+
+        y_pred = []
+        y_true = []
 
         for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
             input_ids = input_ids.to(device)
@@ -779,6 +784,23 @@ def main():
             label_ids = label_ids.to('cpu').numpy()
             idx = (input_mask.to('cpu').numpy() == 1)
             yhat = np.argmax(logits, axis=-1)
+
+            for j in range(yhat.shape[0]):
+                yhat_row = yhat[j, :]
+                y_row = label_ids[j, :]
+                y_true.append([label_id_map[y]
+                                for i, y in enumerate(y_row)
+                                if idx[j, i] & (y_row[i] != -1)])
+                y_pred.append([label_id_map[y]
+                                for i, y in enumerate(yhat_row)
+                                if idx[j, i] & (y_row[i] != -1)])
+                
+                # remove [CLS] and [SEP] tags
+                y_pred[-1] = [x for i, x in enumerate(y_pred[-1])
+                            if y_true[-1][i] not in ("[CLS]", "[SEP]")]
+                y_true[-1] = [x for i, x in enumerate(y_true[-1])
+                            if y_true[-1][i] not in ("[CLS]", "[SEP]")]
+                
             for lbl in label_map:
                 lbl_id = label_map[lbl]
                 tp[lbl] += ((yhat == lbl_id) &
@@ -804,6 +826,7 @@ def main():
                   'loss': loss}
 
         # append label-wise metrics
+        report = classification_report(y_true, y_pred, digits=4)
         stats = {}
         stats['f1'], stats['se'], stats['p+'] = {}, {}, {}
 
@@ -831,6 +854,8 @@ def main():
                     stats['p+'][lbl], stats['se'][lbl], stats['f1'][lbl],
                     n_samples[lbl]
                 ))
+            logger.info("classification report")
+            logger.info("\n%s", report)
 
 
 
