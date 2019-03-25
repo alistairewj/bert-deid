@@ -226,7 +226,10 @@ class CoNLLProcessor(DataProcessor):
         examples = []
         sentence = []
         label = []
-        guid = "%s-%d" % (set_type, 2)
+        # n keeps track of the number of samples processed
+        n = 0
+        # guid = [dataset - sample number - starting line number in original file]
+        guid = "%s-%s-%s" % (set_type, n, 2)
         for (i, line) in enumerate(lines):
             if len(line) == 0:
                 if len(sentence) == 0:
@@ -235,7 +238,6 @@ class CoNLLProcessor(DataProcessor):
 
                 # reformat labels to be a list of anns: [start, stop, entity]
                 # e.g. [[0, 2, 'O'], [2, 6, 'ORG], ...]
-                sentence_len = [len(x) for x in sentence]
                 label_offsets = []
                 s_len = 0
                 for j, l in enumerate(sentence):
@@ -250,7 +252,8 @@ class CoNLLProcessor(DataProcessor):
                     InputExample(guid=guid, text_a=sentence, label=label_offsets))
                 sentence = []
                 label = []
-                guid = "%s-%s" % (set_type, i+1)
+                n += 1
+                guid = "%s-%s-%s" % (set_type, n, i+1)
                 continue
 
             line = line[0]
