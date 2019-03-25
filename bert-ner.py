@@ -321,6 +321,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                 "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info("label_ids: %s" %
                         " ".join([str(x) for x in label_ids]))
+            logger.info("label_id_map: %s" % str(label_map))
 
         features.append(
             InputFeatures(input_ids=input_ids,
