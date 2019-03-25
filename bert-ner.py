@@ -516,10 +516,6 @@ def main():
         "conll": CoNLLProcessor
     }
 
-    num_labels_task = {}
-    for p in processors:
-        num_labels_task[p] = len(processors[p].get_labels())
-
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device(
             "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -561,13 +557,11 @@ def main():
         raise ValueError("Task not found: %s" % (task_name))
 
     processor = processors[task_name]()
-    num_labels = num_labels_task[task_name]
     label_list = processor.get_labels()
+    num_labels = len(label_list)
 
-    # TODO: replace tokenizer to match labels to sub-words
     tokenizer = BertTokenizerNER.from_pretrained(
         args.bert_model, do_lower_case=args.do_lower_case)
-    input_mask = []  # TODO: this
 
     train_examples = None
     num_train_optimization_steps = None
