@@ -180,15 +180,15 @@ class CoNLLProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         combine_labels = {'B-LOC': 'LOC',
-        'B-MISC': 'MISC',
-        'B-ORG': 'ORG',
-        'B-PER': 'PER',
-        'I-LOC': 'LOC',
-        'I-MISC': 'MISC',
-        'I-ORG': 'ORG',
-        'I-PER': 'PER',
-        'O': 'O',
-        'X': 'X'}
+                          'B-MISC': 'MISC',
+                          'B-ORG': 'ORG',
+                          'B-PER': 'PER',
+                          'I-LOC': 'LOC',
+                          'I-MISC': 'MISC',
+                          'I-ORG': 'ORG',
+                          'I-PER': 'PER',
+                          'O': 'O',
+                          'X': 'X'}
         examples = []
         sentence = []
         label = []
@@ -205,7 +205,8 @@ class CoNLLProcessor(DataProcessor):
                 label_offsets = []
                 s_len = 0
                 for j, l in enumerate(sentence):
-                    label_offsets.append([s_len, s_len+len(l), combine_labels[label[j]]])
+                    label_offsets.append(
+                        [s_len, s_len+len(l), combine_labels[label[j]]])
                     # +1 to account for the whitespaces we insert below
                     s_len += len(l) + 1
 
@@ -226,6 +227,7 @@ class CoNLLProcessor(DataProcessor):
             sentence.append(text[0])
             label.append(text[3])
         return examples
+
 
 def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
     """Loads a data file into a list of `InputBatch`s."""
@@ -388,6 +390,9 @@ def main():
     parser.add_argument("--do_train",
                         action='store_true',
                         help="Whether to run training.")
+    parser.add_argument("--finetune",
+                        action='store_true',
+                        help="Fine-tune top layer only.")
     parser.add_argument("--do_eval",
                         action='store_true',
                         help="Whether to run eval on the dev set.")
@@ -543,6 +548,12 @@ def main():
     # Prepare optimizer
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+
+    # if fine-tuning, do not pass bert parameters to optimizer
+    if args.finetune:
+        param_optimizer = [(n, p) for n, p in param_optimizer
+                           if not n.startswith('bert.')]
+
     optimizer_grouped_parameters = [
         {'params': [p for n, p in param_optimizer if not any(
             nd in n for nd in no_decay)], 'weight_decay': 0.01},
@@ -601,6 +612,12 @@ def main():
             train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
         model.train()
+
+        if args.finetune:
+            # freeze lower levels of bert encoder
+            for p in model.bert.parameters():
+                p.requires_grad = False
+
         for _ in trange(int(args.num_train_epochs), desc="Epoch"):
             tr_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
