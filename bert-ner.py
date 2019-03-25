@@ -209,7 +209,10 @@ class CoNLLProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['LOC', 'MISC', 'ORG', 'PER', 'O']
+        return ['[CLS]', '[SEP]', 'O',
+                'B-LOC', 'B-MISC', 'B-ORG', 'B-PER',
+                'I-LOC', 'I-MISC', 'I-ORG', 'I-PER']
+        # return ['[CLS]', '[SEP]', 'LOC', 'MISC', 'ORG', 'PER', 'O']
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -241,8 +244,10 @@ class CoNLLProcessor(DataProcessor):
                 label_offsets = []
                 s_len = 0
                 for j, l in enumerate(sentence):
+                    # label_new = combine_labels[label[j]]
+                    label_new = label[j]
                     label_offsets.append(
-                        [s_len, s_len+len(l), combine_labels[label[j]]])
+                        [s_len, s_len+len(l), label_new])
                     # +1 to account for the whitespaces we insert below
                     s_len += len(l) + 1
 
@@ -512,7 +517,7 @@ def main():
 
     num_labels_task = {
         "deid": 8,
-        "conll": 5
+        "conll": 11
     }
 
     if args.local_rank == -1 or args.no_cuda:
