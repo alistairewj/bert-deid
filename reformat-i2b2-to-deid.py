@@ -27,18 +27,20 @@ parser.add_argument('-o', '--output', type=str,
                     help='folder to output converted annotations')
 
 # create a custom iterator that also returns the span of the sentence
+
+
 def sentence_spans(text):
     tokens = sent_tokenize(text)
-    
+
     # further split using token '\n \n '
     tokens = [x.split('\n \n ') for x in tokens]
     # flatten sublists into a single list
     tokens = list(itertools.chain.from_iterable(tokens))
-    
+
     # further split using token '\n\n'
     tokens = [x.split('\n\n') for x in tokens]
     tokens = list(itertools.chain.from_iterable(tokens))
-    
+
     offset = 0
     for token in tokens:
         offset = text.find(token, offset)
@@ -57,12 +59,13 @@ def tokenize_sentence(text):
 
     return sentences
 
+
 def main(args):
     args = parser.parse_args(args)
 
     # for each file in the folder
     base_path = args.path
-    
+
     out_path = args.output
 
     if not os.path.exists(out_path):
@@ -71,7 +74,7 @@ def main(args):
         os.mkdir(os.path.join(out_path, 'ann'))
     if not os.path.exists(os.path.join(out_path, 'txt')):
         os.mkdir(os.path.join(out_path, 'txt'))
-    
+
     files = os.listdir(base_path)
     files = [f for f in files if f.endswith('.xml')]
 
@@ -81,8 +84,9 @@ def main(args):
 
     tag_list = ['id', 'start', 'end', 'text', 'TYPE', 'comment']
     # we rename the columns to be consistent with other deid dataset
-    # 
-    col_names = ['document_id', 'annotation_id', 'start', 'stop', 'entity', 'entity_type', 'comment']
+    #
+    col_names = ['document_id', 'annotation_id', 'start',
+                 'stop', 'entity', 'entity_type', 'comment']
 
     deid_all = list()
     sentences_all = list()
@@ -101,10 +105,10 @@ def main(args):
             text = text.text
         else:
             print(f'WARNING: {fn} did not have any text.')
-        
+
         # the <TAGS> section has deid annotations
         tags_xml = tree.find('TAGS')
-        
+
         # example tag:
         # <DATE id="P0" start="16" end="26" text="2069-04-07" TYPE="DATE" comment="" />
         tags = list()
@@ -118,13 +122,14 @@ def main(args):
 
         # output dataframe style PHI
         document_id = f[0:-4]
-        df.to_csv(os.path.join(out_path, 'ann', document_id + '.gs'), index=False)
+        df.to_csv(os.path.join(out_path, 'ann',
+                               document_id + '.gs'), index=False)
         with open(os.path.join(out_path, 'txt', document_id + '.txt'), 'w') as fp:
             fp.write(text)
-        
+
         # split the text into sentences
         sentences = tokenize_sentence(text)
-        
+
         # match annotations to the appropriate sentence
         sIdx = 0
         deid_info = [list() for x in range(len(sentences))]
@@ -172,16 +177,13 @@ def main(args):
     deid_fn = os.path.join(out_path, 'sentences.csv')
     with open(deid_fn, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',',
-                                quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                               quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for i in range(len(deid_all)):
             sentence = sentences_all[i]
             # create row: text id, sentence, list of PHI indices
             row = ['.'.join([str(x) for x in sentence[:4]]),
-                    sentence[4], deid_all[i]]
+                   sentence[4], deid_all[i]]
             csvwriter.writerow(row)
-
-
-
 
 
 if __name__ == '__main__':
