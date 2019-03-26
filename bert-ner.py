@@ -530,6 +530,10 @@ def main():
                         help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='',
                         help="Can be used for distant debugging.")
+
+    # allow output of predictions
+    parser.add_argument('--output_predictions', action='store_true',
+                        help="Output predictions to file")
     args = parser.parse_args()
 
     if args.server_ip and args.server_port:
@@ -795,6 +799,19 @@ def main():
         y_pred = []
         y_true = []
 
+        # keep track of IDs so we can output predictions to file with GUID
+        # requires us to use sequential sampler
+        if args.output_predictions:
+            assert type(eval_sampler) == SequentialSampler, \
+                'Must use sequential sampler if outputting predictions'
+
+            output_fn = os.path.join(args.output_dir, "eval_predictions.csv")
+            logger.info("***** Outputting predictions to %s *****", output_fn)
+            fp_output = open(output_fn, 'w')
+            out_writer = csv.writer(fp_output, delimiter=',',
+                                    quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            n = 0
+
         for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
@@ -828,6 +845,12 @@ def main():
                 y_true[-1] = [x for i, x in enumerate(y_true[-1])
                               if y_true[-1][i] not in ("[CLS]", "[SEP]")]
 
+            if args.output_predictions:
+                for j in range(yhat.shape[0]):
+                    out_writer.writerow(
+                        [eval_examples[n+j].guid] + list(yhat[j, :]))
+                n += 8
+
             # calculate running total for true positives, false positives, etc.
             for lbl in label_map:
                 lbl_id = label_map[lbl]
@@ -845,6 +868,9 @@ def main():
 
             nb_eval_examples += input_ids.size(0)
             nb_eval_steps += 1
+
+        if args.output_predictions:
+            fp_output.close()
 
         eval_loss = eval_loss / nb_eval_steps
         loss = tr_loss/nb_tr_steps if args.do_train else None
