@@ -217,16 +217,6 @@ class CoNLLProcessor(DataProcessor):
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
-        combine_labels = {'B-LOC': 'LOC',
-                          'B-MISC': 'MISC',
-                          'B-ORG': 'ORG',
-                          'B-PER': 'PER',
-                          'I-LOC': 'LOC',
-                          'I-MISC': 'MISC',
-                          'I-ORG': 'ORG',
-                          'I-PER': 'PER',
-                          'O': 'O',
-                          'X': 'X'}
         examples = []
         sentence = []
         label = []
