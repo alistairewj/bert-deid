@@ -210,10 +210,22 @@ class i2b2Processor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['AGE', 'BIOID', 'CITY', 'COUNTRY', 'DATE', 'DEVICE', 'DOCTOR',
-                'EMAIL', 'FAX', 'HEALTHPLAN', 'HOSPITAL', 'IDNUM',
-                'LOCATION-OTHER', 'MEDICALRECORD', 'ORGANIZATION', 'PATIENT',
-                'PHONE', 'PROFESSION', 'STATE', 'STREET', 'URL', 'USERNAME', 'ZIP']
+        return [
+            # names
+            'DOCTOR', 'PATIENT', 'USERNAME',
+            # professions
+            'PROFESSION',
+            # locations
+            'HOSPITAL', 'ORGANIZATION',
+            'STREET', 'STATE', 'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
+            # age > 89
+            'AGE',
+            # dates
+            'DATE',
+            # IDs
+            'BIOID', 'DEVICE',  'HEALTHPLAN',  'IDNUM', 'MEDICALRECORD',
+            'EMAIL', 'FAX', 'PHONE', 'URL'
+        ]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
