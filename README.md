@@ -9,6 +9,16 @@ CoNLL:
 
 ## i2b2
 
+First create a CSV dataset from XML:
+
+```
+python reformat-i2b2-to-deid.py -p i2b2/train -o i2b2/train-reformatted
+python reformat-i2b2-to-deid.py -p i2b2/test-with-tags -o i2b2/test-reformatted
+
+mv i2b2/test-reformatted/sentences.csv i2b2/dev.csv
+mv i2b2/train-reformatted/sentences.csv i2b2/train.csv
+``` 
+
 `python bert-ner.py --data_dir i2b2data --bert_model bert-base-cased --task_name i2b2 --output_dir i2b2_model --do_train`
 
 Convert output predictions to XML:
