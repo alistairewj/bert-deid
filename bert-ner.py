@@ -193,6 +193,44 @@ class DeidProcessor(DataProcessor):
         return examples
 
 
+class i2b2Processor(DataProcessor):
+    """Processor for the i2b2 de-id data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {}".format(
+            os.path.join(data_dir, "train.tsv")))
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "train.csv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ['AGE', 'BIOID', 'CITY', 'COUNTRY', 'DATE', 'DEVICE', 'DOCTOR',
+                'EMAIL', 'FAX', 'HEALTHPLAN', 'HOSPITAL', 'IDNUM',
+                'LOCATION-OTHER', 'MEDICALRECORD', 'ORGANIZATION', 'PATIENT',
+                'PHONE', 'PROFESSION', 'STATE', 'STREET', 'URL', 'USERNAME', 'ZIP']
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[1]
+            # dataset has stored labels as a list of offsets
+            # trust the data and call eval on the string
+            label = eval(line[2])
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, label=label))
+        return examples
+
+
 class CoNLLProcessor(DataProcessor):
     """Processor for the gold standard de-id data set."""
 
@@ -504,7 +542,8 @@ def main():
 
     processors = {
         "deid": DeidProcessor,
-        "conll": CoNLLProcessor
+        "conll": CoNLLProcessor,
+        "i2b2": i2b2Processor
     }
 
     if args.local_rank == -1 or args.no_cuda:
