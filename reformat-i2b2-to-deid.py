@@ -32,8 +32,8 @@ parser.add_argument('-o', '--output', type=str,
 def sentence_spans(text):
     tokens = sent_tokenize(text)
 
-    # further split using token '\n \n '
-    tokens = [x.split('\n \n ') for x in tokens]
+    # further split using token '\n \n'
+    tokens = [x.split('\n \n') for x in tokens]
     # flatten sublists into a single list
     tokens = list(itertools.chain.from_iterable(tokens))
 
