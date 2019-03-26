@@ -5,7 +5,7 @@ Code to fine-tune BERT on a medical note de-identification task.
 
 CoNLL:
 
-`python bert-ner.py --data_dir conll --bert_model bert-base-cased --task_name conll --output_dir conll_model --do_train --no_cuda --finetune`
+`python bert_ner.py --data_dir conll --bert_model bert-base-cased --task_name conll --output_dir conll_model --do_train --do_eval`
 
 ## i2b2
 
@@ -19,7 +19,7 @@ mv i2b2/test-reformatted/sentences.csv i2b2/dev.csv
 mv i2b2/train-reformatted/sentences.csv i2b2/train.csv
 ``` 
 
-`python bert-ner.py --data_dir i2b2data --bert_model bert-base-cased --task_name i2b2 --output_dir i2b2_model --do_train`
+`python bert_ner.py --data_dir i2b2data --bert_model bert-base-cased --task_name i2b2 --output_dir i2b2_model --do_train`
 
 Convert output predictions to XML:
 
