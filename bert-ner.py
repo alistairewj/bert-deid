@@ -224,7 +224,9 @@ class i2b2Processor(DataProcessor):
             'DATE',
             # IDs
             'BIOID', 'DEVICE',  'HEALTHPLAN',  'IDNUM', 'MEDICALRECORD',
-            'EMAIL', 'FAX', 'PHONE', 'URL'
+            'EMAIL', 'FAX', 'PHONE', 'URL',
+            # catch all object
+            'O'
         ]
 
     def _create_examples(self, lines, set_type):
