@@ -314,10 +314,89 @@ class CoNLLProcessor(DataProcessor):
         return examples
 
 
-def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
-    """Loads a data file into a list of `InputBatch`s."""
+def prepare_tokens(tokens, tokens_sw, tokens_idx, label,
+                   label_list, max_seq_length, tokenizer):
 
     label_map = {label: i for i, label in enumerate(label_list)}
+
+    # The convention in BERT is:
+    # (a) For sequence pairs:
+    #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+    #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
+    # (b) For single sequences:
+    #  tokens:   [CLS] the dog is hairy . [SEP]
+    #  type_ids: 0   0   0   0  0     0 0
+    #
+    # Where "type_ids" are used to indicate whether this is the first
+    # sequence or the second sequence. The embedding vectors for `type=0` and
+    # `type=1` were learned during pre-training and are added to the wordpiece
+    # embedding vector (and position vector). This is not *strictly* necessary
+    # since the [SEP] token unambigiously separates the sequences, but it makes
+    # it easier for the model to learn the concept of sequences.
+    #
+    # For classification tasks, the first vector (corresponding to [CLS]) is
+    # used as as the "sentence vector". Note that this only makes sense because
+    # the entire model is fine-tuned.
+    tokens = ["[CLS]"] + tokens + ["[SEP]"]
+    tokens_sw = [0] + tokens_sw + [0]
+    indices = [[-1]] + tokens_idx + [[-1]]
+    segment_ids = [0] * len(tokens)
+
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+    # example.label is a list of start/stop offsets for tagged entities
+    # use this to create list of labels for each token
+    # assumes labels are ordered
+    labels = ['O'] * len(input_ids)
+    if len(label) > 0:
+        l_idx = 0
+        start, stop, entity = label[l_idx]
+        for i, idx in enumerate(indices):
+            if idx[0] >= stop:
+                l_idx += 1
+                # exit loop if we have finished assigning labels
+                if l_idx >= len(label):
+                    break
+                start, stop, entity = label[l_idx]
+
+            if (idx[0] >= start) & (idx[0] < stop):
+                # tokens are assigned based on label of first character
+                labels[i] = entity
+
+    # convert from text labels to integer coding
+    # if a label is not in the map, we ignore that token in backprop
+    labels[0] = "[CLS]"
+    labels[-1] = "[SEP]"
+    label_ids = [label_map[x]
+                 if x in label_map
+                 else -1
+                 for x in labels]
+
+    # set labels for subwords to -1 to ignore them in label loss
+    label_ids = [-1 if tokens_sw[i] == 1
+                 else label_id
+                 for i, label_id in enumerate(label_ids)]
+
+    # The mask has 1 for real tokens and 0 for padding tokens.
+    input_mask = [1] * len(input_ids)
+
+    # Zero-pad up to the sequence length.
+    padding = [0] * (max_seq_length - len(input_ids))
+    input_ids += padding
+    input_mask += padding
+    segment_ids += padding
+    label_ids += padding
+
+    assert len(input_ids) == max_seq_length
+    assert len(input_mask) == max_seq_length
+    assert len(segment_ids) == max_seq_length
+    assert len(label_ids) == max_seq_length
+
+    return tokens, input_ids, input_mask, segment_ids, label_ids
+
+
+def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
+    """Loads a data file into a list of `InputBatch`s."""
 
     features = []
     for (ex_index, example) in enumerate(examples):
@@ -331,78 +410,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
             tokens_a_sw = tokens_a_sw[:(max_seq_length - 2)]
             tokens_a_idx = tokens_a_idx[:(max_seq_length - 2)]
 
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids: 0   0   0   0  0     0 0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambigiously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
-        tokens_sw = [0] + tokens_a_sw + [0]
-        indices = [[-1]] + tokens_a_idx + [[-1]]
-        segment_ids = [0] * len(tokens)
-
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-        # example.label is a list of start/stop offsets for tagged entities
-        # use this to create list of labels for each token
-        # assumes labels are ordered
-        labels = ['O'] * len(input_ids)
-        if len(example.label) > 0:
-            l_idx = 0
-            start, stop, entity = example.label[l_idx]
-            for i, idx in enumerate(indices):
-                if idx[0] >= stop:
-                    l_idx += 1
-                    # exit loop if we have finished assigning labels
-                    if l_idx >= len(example.label):
-                        break
-                    start, stop, entity = example.label[l_idx]
-
-                if (idx[0] >= start) & (idx[0] < stop):
-                    # tokens are assigned based on label of first character
-                    labels[i] = entity
-
-        # convert from text labels to integer coding
-        # if a label is not in the map, we ignore that token in backprop
-        labels[0] = "[CLS]"
-        labels[-1] = "[SEP]"
-        label_ids = [label_map[x]
-                     if x in label_map
-                     else -1
-                     for x in labels]
-
-        # set labels for subwords to -1 to ignore them in label loss
-        label_ids = [-1 if tokens_sw[i] == 1
-                     else label_id
-                     for i, label_id in enumerate(label_ids)]
-
-        # The mask has 1 for real tokens and 0 for padding tokens.
-        input_mask = [1] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
-        padding = [0] * (max_seq_length - len(input_ids))
-        input_ids += padding
-        input_mask += padding
-        segment_ids += padding
-        label_ids += padding
-
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(segment_ids) == max_seq_length
-        assert len(label_ids) == max_seq_length
+        tokens, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
+            tokens_a, tokens_a_sw, tokens_a_idx, example.label,
+            label_list, max_seq_length, tokenizer)
 
         if ex_index < 5:
             logger.info("*** Example ***")
@@ -417,7 +427,6 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                 "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info("label_ids: %s" %
                         " ".join([str(x) for x in label_ids]))
-            logger.info("label_id_map: %s" % str(label_map))
 
         features.append(
             InputFeatures(input_ids=input_ids,
