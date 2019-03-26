@@ -345,7 +345,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         # example.label is a list of start/stop offsets for tagged entities
         # use this to create list of labels for each token
         # assumes labels are ordered
-        labels = ['None'] * len(input_ids)
+        labels = ['O'] * len(input_ids)
         if len(example.label) > 0:
             l_idx = 0
             start, stop, entity = example.label[l_idx]
