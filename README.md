@@ -56,3 +56,9 @@ for f in files:
     shutil.copyfile(f'{model_pred_xml_path}/{f}.xml', f'{output_path}/pred/{f}.xml')
 
 ```
+
+Generate CoNLL format outputs from a trained model (outputs to preds.conll file):
+
+```
+python apply_model.py --input i2b2/test-reformatted/txt --labels i2b2/test-reformatted/ann --bert_model bert-base-cased --task_name i2b2 --output_dir i2b2_model --conll
+```

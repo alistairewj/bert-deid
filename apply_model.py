@@ -6,7 +6,6 @@ import argparse
 import csv
 import logging
 import os
-import random
 import sys
 import itertools
 
@@ -17,16 +16,11 @@ from nltk.tokenize import sent_tokenize
 
 import numpy as np
 import torch
-from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
-                              TensorDataset)
-from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import (DataLoader, SequentialSampler, TensorDataset)
 
-from seqeval.metrics import classification_report
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
-from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from pytorch_pretrained_bert.modeling import BertForTokenClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
+from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
@@ -80,7 +74,8 @@ def main():
                         default=None,
                         type=str,
                         required=True,
-                        help=("The input data. Should be a text file"))
+                        help=("The input data. Either a single text file, "
+                              "or a folder containing .txt files"))
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
@@ -100,11 +95,8 @@ def main():
     parser.add_argument("--labels",
                         default=None,
                         type=str,
-                        help=("The input labels. Should be a text file"))
-    parser.add_argument("--cache_dir",
-                        default="",
-                        type=str,
-                        help="Where do you want to store the pre-trained models downloaded from s3")
+                        help=("The input labels. Either a single text file, "
+                              "or a folder containing .txt files"))
     parser.add_argument("--max_seq_length",
                         default=128,
                         type=int,
@@ -121,22 +113,6 @@ def main():
     parser.add_argument("--no_cuda",
                         action='store_true',
                         help="Whether not to use CUDA when available")
-    parser.add_argument("--local_rank",
-                        type=int,
-                        default=-1,
-                        help="local_rank for distributed training on gpus")
-    parser.add_argument('--gradient_accumulation_steps',
-                        type=int,
-                        default=1,
-                        help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument('--fp16',
-                        action='store_true',
-                        help="Whether to use 16-bit float precision instead of 32-bit")
-    parser.add_argument('--loss_scale',
-                        type=float, default=0,
-                        help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
-                             "0 (default value): dynamic loss scaling.\n"
-                             "Positive power of 2: static loss scaling value.\n")
     parser.add_argument('--conll', action='store_true',
                         help="Output predictions in CoNLL format.")
 
@@ -148,22 +124,12 @@ def main():
         "i2b2": bert_ner.i2b2Processor
     }
 
-    if args.local_rank == -1 or args.no_cuda:
-        device = torch.device(
-            "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-        n_gpu = torch.cuda.device_count()
+    if args.no_cuda:
+        device = torch.device("cpu")
     else:
-        torch.cuda.set_device(args.local_rank)
-        device = torch.device("cuda", args.local_rank)
-        n_gpu = 1
-        # Initializes the distributed backend
-        torch.distributed.init_process_group(backend='nccl')
-    logger.info("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
-        device, n_gpu, bool(args.local_rank != -1), args.fp16))
-
-    if args.gradient_accumulation_steps < 1:
-        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-            args.gradient_accumulation_steps))
+        device = torch.device("cuda")
+    n_gpu = torch.cuda.device_count()
+    logger.info("device: {} n_gpu: {}".format(device, n_gpu))
 
     task_name = args.task_name.lower()
 
@@ -192,31 +158,60 @@ def main():
 
     model.to(device)
 
-    if (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        # load text
-        with open(args.input, 'r') as fp:
-            text = ''.join(fp.readlines())
-        # remove .txt from document id
-        doc_id = args.input[0:-4]
-        if args.labels is not None:
-            # load labels into list
-            labels = []
-            with open(args.labels, 'r') as csvfile:
-                csvreader = csv.reader(csvfile, delimiter=',', quotechar='"')
-                # skip header
-                next(csvreader)
-                for row in csvreader:
-                    # get start/stop/entity type
-                    labels.append([int(row[2]), int(row[3]), row[5]])
+    # if input is a single text file, wrap it in a list
+    if os.path.exists(args.input):
+        if os.path.isdir(args.input):
+            input_path = args.input
+            label_path = args.labels
+            files = os.listdir(input_path)
+            files = [f for f in files if f.endswith('.txt')]
+
+            label_files = os.listdir(label_path)
+            label_files = [f for f in label_files if f.endswith('.gs')]
+
+            # ensure we have files for each input/label
+            doc_id = [f[0:-4] for f in files if f[0:-4] + '.gs' in label_files]
+            label_files = [f + '.gs' for f in doc_id]
+            files = [f + '.txt' for f in doc_id]
         else:
-            labels = []
+            files = [args.input]
+            label_files = [args.labels]
+            doc_id = [args.input]
+            input_path = ''
+            label_path = ''
+    else:
+        raise ValueError('Input file/folder %s does not exist.',
+                         args.input)
+    
+    logger.info("Parsing {} input file(s)".format(len(files)))
+    tokens_all, tokens_sw_all, tokens_idx_all = [], [], []
+    doc_id_all = []
+
+    # create features
+    eval_features = []
+
+    # load text
+    for i, f in enumerate(doc_id):
+        with open(os.path.join(input_path, f + '.txt'), 'r') as fp:
+            text = ''.join(fp.readlines())
+
+        # load labels into list
+        labels = []
+        with open(os.path.join(label_path, f + '.gs'), 'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', quotechar='"')
+            # skip header
+            next(csvreader)
+            for row in csvreader:
+                # get start/stop/entity type
+                labels.append([int(row[2]), int(row[3]), row[5]])
+        #else:
+        #    labels = []
 
         # split the text into sentences
         # this is a list of lists, each sub-list has 4 elements:
         #   sentence number, start index, end index, text of the sentence
         sentences = tokenize_sentence(text)
-
-        tokens_all, tokens_sw_all, tokens_idx_all = [], [], []
+        
         for sent in sentences:
             # track offsets in tokenization
             tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize(sent[3])
@@ -227,181 +222,189 @@ def main():
 
             # Account for [CLS] and [SEP] with "- 2"
             if len(tokens_a) > args.max_seq_length - 2:
-                n_splits = np.ceil(float(len(tokens_a)) /
-                                   (args.max_seq_length - 2))
+                n_splits = int(np.ceil(float(len(tokens_a)) /
+                                    (args.max_seq_length - 2)))
                 len_split = int(np.ceil(len(tokens_a) / n_splits))
                 for j in range(n_splits):
                     start, stop = j*len_split, (j+1)*len_split
                     tokens_all.append(tokens_a[start:stop])
                     tokens_sw_all.append(tokens_a_sw[start:stop])
                     tokens_idx_all.append(tokens_a_idx[start:stop])
+                    doc_id_all.append(f)
+
+                    _, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
+                        tokens_a[start:stop], tokens_a_sw[start:stop], tokens_a_idx[start:stop],
+                        labels, label_list, args.max_seq_length, tokenizer)
+
+                    eval_features.append(InputFeatures(input_ids=input_ids,
+                                                        input_mask=input_mask,
+                                                        segment_ids=segment_ids,
+                                                        label_ids=label_ids))
             else:
                 tokens_all.append(tokens_a)
                 tokens_sw_all.append(tokens_a_sw)
                 tokens_idx_all.append(tokens_a_idx)
+                doc_id_all.append(f)
 
-        # create features
-        eval_features = []
-        for i in range(len(tokens_all)):
-            _, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
-                tokens_all[i], tokens_sw_all[i], tokens_idx_all[i], labels,
-                label_list, args.max_seq_length, tokenizer)
+                _, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
+                    tokens_a, tokens_a_sw, tokens_a_idx,
+                    labels, label_list, args.max_seq_length, tokenizer)
 
-            eval_features.append(InputFeatures(input_ids=input_ids,
-                                               input_mask=input_mask,
-                                               segment_ids=segment_ids,
-                                               label_ids=label_ids))
+                eval_features.append(InputFeatures(input_ids=input_ids,
+                                                    input_mask=input_mask,
+                                                    segment_ids=segment_ids,
+                                                    label_ids=label_ids))
 
-        logger.info("***** Running evaluation *****")
-        logger.info("  Num examples = %d", len(eval_features))
-        logger.info("  Batch size = %d", args.eval_batch_size)
-        all_input_ids = torch.tensor(
-            [f.input_ids for f in eval_features], dtype=torch.long)
-        all_input_mask = torch.tensor(
-            [f.input_mask for f in eval_features], dtype=torch.long)
-        all_segment_ids = torch.tensor(
-            [f.segment_ids for f in eval_features], dtype=torch.long)
-        all_label_ids = torch.tensor(
-            [f.label_ids for f in eval_features], dtype=torch.long)
-        eval_data = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
+    logger.info("***** Running evaluation *****")
+    logger.info("  Num examples = %d", len(eval_features))
+    logger.info("  Batch size = %d", args.eval_batch_size)
+    all_input_ids = torch.tensor(
+        [f.input_ids for f in eval_features], dtype=torch.long)
+    all_input_mask = torch.tensor(
+        [f.input_mask for f in eval_features], dtype=torch.long)
+    all_segment_ids = torch.tensor(
+        [f.segment_ids for f in eval_features], dtype=torch.long)
+    all_label_ids = torch.tensor(
+        [f.label_ids for f in eval_features], dtype=torch.long)
+    eval_data = TensorDataset(
+        all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
 
-        # Run prediction for full data
-        eval_sampler = SequentialSampler(eval_data)
-        eval_dataloader = DataLoader(
-            eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+    # Run prediction for full data
+    eval_sampler = SequentialSampler(eval_data)
+    eval_dataloader = DataLoader(
+        eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
-        model.eval()
+    model.eval()
 
-        # create result dictionaries for all labels
-        label_list = processor.get_labels()
-        label_id_map = {i: label for i, label in enumerate(label_list)}
+    # create result dictionaries for all labels
+    label_list = processor.get_labels()
+    label_id_map = {i: label for i, label in enumerate(label_list)}
 
-        y_pred = []
+    y_pred = []
 
-        # keep track of IDs so we can output predictions to file with GUID
-        # requires us to use sequential sampler
-        assert type(eval_sampler) == SequentialSampler, \
-            'Must use sequential sampler if outputting predictions'
-        n = 0
+    # keep track of IDs so we can output predictions to file with GUID
+    # requires us to use sequential sampler
+    assert type(eval_sampler) == SequentialSampler, \
+        'Must use sequential sampler if outputting predictions'
+    n = 0
 
-        if args.conll:
-            output_fn = os.path.join(doc_id + ".conll")
-            logger.info("***** Outputting CoNLL format to %s *****", output_fn)
-            fp_output = open(output_fn, 'w')
+    if args.conll:
+        output_fn = "preds.conll"
+        logger.info("***** Outputting CoNLL format predictions to %s *****", output_fn)
+        fp_output = open(output_fn, 'w')
 
-        for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
-            input_ids = input_ids.to(device)
-            input_mask = input_mask.to(device)
-            segment_ids = segment_ids.to(device)
-            label_ids = label_ids.to(device)
+    for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
+        input_ids = input_ids.to(device)
+        input_mask = input_mask.to(device)
+        segment_ids = segment_ids.to(device)
+        label_ids = label_ids.to(device)
 
-            with torch.no_grad():
-                logits = model(input_ids, segment_ids, input_mask)
+        with torch.no_grad():
+            logits = model(input_ids, segment_ids, input_mask)
 
-            logits = logits.detach().cpu().numpy()
-            label_ids = label_ids.to('cpu').numpy()
-            idx = (input_mask.to('cpu').numpy() == 1) & (label_ids != -1)
-            yhat = np.argmax(logits, axis=-1)
+        logits = logits.detach().cpu().numpy()
+        label_ids = label_ids.to('cpu').numpy()
+        idx = (input_mask.to('cpu').numpy() == 1) & (label_ids != -1)
+        yhat = np.argmax(logits, axis=-1)
 
-            # convert predictions into doc_id, start, stop, type
+        # convert predictions into doc_id, start, stop, type
 
-            # add this batch to the y_true/y_pred lists
-            for j in range(yhat.shape[0]):
-                tokens = tokens_all[n+j]
-                tokens_sw = tokens_sw_all[n+j]
-                tokens_idx = tokens_idx_all[n+j]
-                tokens_mask = list(idx[j, :])
-                labels = label_ids[j, :].tolist()
+        # add this batch to the y_true/y_pred lists
+        for j in range(yhat.shape[0]):
+            tokens = tokens_all[n+j]
+            tokens_sw = tokens_sw_all[n+j]
+            tokens_idx = tokens_idx_all[n+j]
+            tokens_mask = list(idx[j, :])
+            labels = label_ids[j, :].tolist()
 
-                if len(tokens) == 0:
-                    continue
+            if len(tokens) == 0:
+                continue
 
-                # remove [CLS] at beginning
-                pred = yhat[j, 1:]
-                tokens_mask = tokens_mask[1:]
-                labels = labels[1:]
+            # remove [CLS] at beginning
+            pred = yhat[j, 1:]
+            tokens_mask = tokens_mask[1:]
+            labels = labels[1:]
 
-                if tokens[-1] == '[SEP]':
-                    pred = pred[:-1]
-                    tokens_mask = tokens_mask[:-1]
-                    labels = labels[:-1]
+            if tokens[-1] == '[SEP]':
+                pred = pred[:-1]
+                tokens_mask = tokens_mask[:-1]
+                labels = labels[:-1]
+            else:
+                # subselect pred and mask down to length of tokens
+                pred = pred[0:len(tokens)]
+                tokens_mask = tokens_mask[0:len(tokens)]
+                labels = labels[0:len(tokens)]
+
+            if len(pred) == 0:
+                continue
+
+            pred = [label_id_map[x] for x in pred]
+
+            # the model does not make predictions for sub-words
+            # the first word-part for a segmented sub-word is used as the prediction
+            # so we append sub-word indices to previous non-subword indices
+            k = 0
+            while k < len(tokens_sw):
+                if tokens_sw[k] == 1:
+                    # pop these indices
+                    current_idx = tokens_idx.pop(k)
+                    # add sub-word index to previous non-subword
+                    tokens_idx[k-1].extend(current_idx)
+
+                    token_add = tokens.pop(k)
+                    tokens[k-1] = tokens[k-1] + token_add[2:]
+                    # remove the token from other lists
+                    pred.pop(k)
+                    tokens_sw.pop(k)
+                    labels.pop(k)
+                    tokens_mask.pop(k)
                 else:
-                    # subselect pred and mask down to length of tokens
-                    pred = pred[0:len(tokens)]
-                    tokens_mask = tokens_mask[0:len(tokens)]
-                    labels = labels[0:len(tokens)]
+                    k += 1
 
-                if len(pred) == 0:
+            for k in range(len(pred)):
+                # skip if masked/subword
+                if not tokens_mask[k]:
                     continue
 
-                pred = [label_id_map[x] for x in pred]
-
-                # the model does not make predictions for sub-words
-                # the first word-part for a segmented sub-word is used as the prediction
-                # so we append sub-word indices to previous non-subword indices
-                k = 0
-                while k < len(tokens_sw):
-                    if tokens_sw[k] == 1:
-                        # pop these indices
-                        current_idx = tokens_idx.pop(k)
-                        # add sub-word index to previous non-subword
-                        tokens_idx[k-1].extend(current_idx)
-
-                        token_add = tokens.pop(k)
-                        tokens[k-1] = tokens[k-1] + token_add[2:]
-                        # remove the token from other lists
-                        pred.pop(k)
-                        tokens_sw.pop(k)
-                        labels.pop(k)
-                        tokens_mask.pop(k)
-                    else:
-                        k += 1
-
-                for k in range(len(pred)):
-                    # skip if masked/subword
-                    if not tokens_mask[k]:
-                        continue
-
-                    # for this sentence, get start/stop indices
-                    start = tokens_idx[k][0]
-                    stop = tokens_idx[k][-1] + 1
-
-                    if args.conll:
-                        # output conll format
-                        row = [
-                            tokens[k],
-                            doc_id,
-                            str(start),
-                            str(stop),
-                            label_id_map[labels[k]],
-                            pred[k]
-                        ]
-                        fp_output.write(' '.join(row) + '\n')
-
-                    if pred[k] == 'O':
-                        continue
-
-                    y_pred.append(
-                        [doc_id, start, stop, tokens[k], pred[k]])
+                # for this sentence, get start/stop indices
+                start = tokens_idx[k][0]
+                stop = tokens_idx[k][-1] + 1
 
                 if args.conll:
-                    # add extra blank line
-                    fp_output.write('\n')
+                    # output conll format
+                    row = [
+                        tokens[k],
+                        doc_id_all[n+j],
+                        str(start),
+                        str(stop),
+                        label_id_map[labels[k]],
+                        pred[k]
+                    ]
+                    fp_output.write(' '.join(row) + '\n')
 
-            n += input_ids.shape[0]
+                if pred[k] == 'O':
+                    continue
 
-        # close conll file
-        if args.conll:
-            fp_output.close()
+                y_pred.append(
+                    [doc_id_all[n+j], start, stop, tokens[k], pred[k]])
 
-        output_fn = os.path.join(doc_id + ".preds")
-        logger.info("***** Outputting predictions to %s *****", output_fn)
-        with open(output_fn, 'w') as fp_output:
-            out_writer = csv.writer(fp_output, delimiter=',',
-                                    quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            for row in y_pred:
-                out_writer.writerow(row)
+            if args.conll:
+                # add extra blank line
+                fp_output.write('\n')
+
+        n += input_ids.shape[0]
+
+    # close conll file
+    if args.conll:
+        fp_output.close()
+
+    output_fn = os.path.join("bert_preds")
+    logger.info("***** Outputting predictions to %s *****", output_fn)
+    with open(output_fn, 'w') as fp_output:
+        out_writer = csv.writer(fp_output, delimiter=',',
+                                quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        for row in y_pred:
+            out_writer.writerow(row)
 
 
 if __name__ == "__main__":
