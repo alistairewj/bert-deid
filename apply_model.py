@@ -28,42 +28,12 @@ from tokenization import BertTokenizerNER
 
 import bert_ner
 from bert_ner import prepare_tokens, BertForNER, InputFeatures
+from create_csv import split_by_overlap, split_by_sentence
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def sentence_spans(text):
-    tokens = sent_tokenize(text)
-
-    # further split using token '\n \n'
-    tokens = [x.split('\n \n') for x in tokens]
-    # flatten sublists into a single list
-    tokens = list(itertools.chain.from_iterable(tokens))
-
-    # further split using token '\n\n'
-    tokens = [x.split('\n\n') for x in tokens]
-    tokens = list(itertools.chain.from_iterable(tokens))
-
-    offset = 0
-    for token in tokens:
-        offset = text.find(token, offset)
-        yield token, offset, offset+len(token)
-        offset += len(token)
-
-
-def tokenize_sentence(text):
-    # section the reports
-    # p_section = re.compile('^\s+([A-Z /,-]+):', re.MULTILINE)
-    sentences = list()
-    n = 0
-    for sent, start, end in sentence_spans(text):
-        sentences.append([n, start, end, sent])
-        n += 1
-
-    return sentences
 
 
 def main():
@@ -77,9 +47,13 @@ def main():
                         help=("The input data. Either a single text file, "
                               "or a folder containing .txt files"))
     parser.add_argument("--bert_model", default=None, type=str, required=True,
-                        help="Bert pre-trained model selected in the list: bert-base-uncased, "
-                        "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
-                        "bert-base-multilingual-cased, bert-base-chinese.")
+                        choices=[
+                            "bert-base-uncased", "bert-base-cased",
+                            "bert-large-uncased", "bert-large-cased",
+                            "bert-base-multilingual-uncased",
+                            "bert-base-multilingual-cased",
+                            "bert-base-chinese"],
+                        help="BERT pre-trained model")
     parser.add_argument("--task_name",
                         default=None,
                         type=str,
@@ -89,14 +63,25 @@ def main():
                         default=None,
                         type=str,
                         required=True,
-                        help="The output directory where the model predictions and checkpoints will be written.")
+                        help=("The output directory where the model "
+                              "predictions and checkpoints will be written."))
 
+    parser.add_argument('-m', '--method', type=str,
+                        default='sentence',
+                        choices=['sentence', 'overlap'],
+                        help='method for splitting text into individual examples.')
+    parser.add_argument('--step-size', type=int,
+                        default=20,
+                        help='if method is overlap, the token step size to use.')
+    parser.add_argument('--sequence-length', type=int,
+                        default=100,
+                        help='if method is overlap, the maximum token length.')
     # Other parameters
     parser.add_argument("--labels",
                         default=None,
                         type=str,
-                        help=("The input labels. Either a single text file, "
-                              "or a folder containing .txt files"))
+                        help=("The input labels. Either a single gs file, "
+                              "or a folder containing .gs files"))
     parser.add_argument("--max_seq_length",
                         default=128,
                         type=int,
@@ -210,50 +195,73 @@ def main():
         # split the text into sentences
         # this is a list of lists, each sub-list has 4 elements:
         #   sentence number, start index, end index, text of the sentence
-        sentences = tokenize_sentence(text)
+        if args.method == 'sentence':
+            examples = split_by_sentence(text)
+        else:
+            examples = split_by_overlap(
+                text, tokenizer,
+                token_step_size=args.step_size,
+                max_seq_len=args.sequence_length
+            )
 
-        for sent in sentences:
+        for e, example in enumerate(examples):
             # track offsets in tokenization
-            tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize(sent[3])
+            tokens, tokens_sw, tokens_idx = tokenizer.tokenize(
+                example[3])
 
-            # offset idx based upon start index of sentence
-            for j in range(len(tokens_a_idx)):
-                tokens_a_idx[j] = [t + sent[1] for t in tokens_a_idx[j]]
+            # offset labels based upon example start
+            start = example[1]
+            labels_offset = []
+            for k in range(len(labels)):
+                if labels[k][1] < start:
+                    continue
+                # if this label annotates tokens before this example
+                if labels[k][0] < start:
+                    labels_offset.append([
+                        0,
+                        labels[k][1]-start,
+                        labels[k][2]
+                    ])
+                else:
+                    labels_offset.append([
+                        labels[k][0] - start,
+                        labels[k][1] - start,
+                        labels[k][2]
+                    ])
 
-            # Account for [CLS] and [SEP] with "- 2"
-            if len(tokens_a) > args.max_seq_length - 2:
-                n_splits = int(np.ceil(float(len(tokens_a)) /
-                                       (args.max_seq_length - 2)))
-                len_split = int(np.ceil(len(tokens_a) / n_splits))
-                for j in range(n_splits):
-                    start, stop = j*len_split, (j+1)*len_split
-                    tokens_all.append(tokens_a[start:stop])
-                    tokens_sw_all.append(tokens_a_sw[start:stop])
-                    tokens_idx_all.append(tokens_a_idx[start:stop])
-                    doc_id_all.append(f)
+            tokens = ["[CLS]"] + tokens + ["[SEP]"]
+            tokens_sw = [0] + tokens_sw + [0]
+            tokens_idx = [[-1]] + tokens_idx + [[-1]]
 
-                    _, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
-                        tokens_a[start:stop], tokens_a_sw[start:stop], tokens_a_idx[start:stop],
-                        labels, label_list, args.max_seq_length, tokenizer)
+            input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
+                tokens, tokens_sw, tokens_idx,
+                labels_offset, label_list,
+                args.max_seq_length, tokenizer
+            )
 
-                    eval_features.append(InputFeatures(input_ids=input_ids,
-                                                       input_mask=input_mask,
-                                                       segment_ids=segment_ids,
-                                                       label_ids=label_ids))
-            else:
-                tokens_all.append(tokens_a)
-                tokens_sw_all.append(tokens_a_sw)
-                tokens_idx_all.append(tokens_a_idx)
-                doc_id_all.append(f)
+            tokens_all.append(tokens)
+            tokens_sw_all.append(tokens_sw)
+            tokens_idx_all.append(tokens_idx)
+            doc_id_all.append(f)
 
-                _, input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
-                    tokens_a, tokens_a_sw, tokens_a_idx,
-                    labels, label_list, args.max_seq_length, tokenizer)
+            eval_features.append(InputFeatures(input_ids=input_ids,
+                                               input_mask=input_mask,
+                                               segment_ids=segment_ids,
+                                               label_ids=label_ids))
 
-                eval_features.append(InputFeatures(input_ids=input_ids,
-                                                   input_mask=input_mask,
-                                                   segment_ids=segment_ids,
-                                                   label_ids=label_ids))
+            if (i == 0) & (e < 5):
+                logger.info("*** Example ***")
+                logger.info("guid: %s" % (f'{f}-{e}'))
+                logger.info("tokens: %s" % " ".join(
+                    [str(x) for x in tokens]))
+                logger.info("input_ids: %s" %
+                            " ".join([str(x) for x in input_ids]))
+                logger.info("input_mask: %s" %
+                            " ".join([str(x) for x in input_mask]))
+                logger.info(
+                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                logger.info("label_ids: %s" %
+                            " ".join([str(x) for x in label_ids]))
 
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_features))
@@ -294,7 +302,8 @@ def main():
             "***** Outputting CoNLL format predictions to %s *****", output_fn)
         fp_output = open(output_fn, 'w')
 
-    for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
+    for input_ids, input_mask, segment_ids, label_ids in tqdm(
+            eval_dataloader, desc="Evaluating"):
         input_ids = input_ids.to(device)
         input_mask = input_mask.to(device)
         segment_ids = segment_ids.to(device)
@@ -317,26 +326,25 @@ def main():
             tokens_idx = tokens_idx_all[n+j]
             tokens_mask = list(idx[j, :])
             labels = label_ids[j, :].tolist()
-
-            if len(tokens) == 0:
-                continue
+            pred = yhat[j, :].tolist()
 
             # remove [CLS] at beginning
-            pred = yhat[j, 1:]
+            tokens = tokens[1:]
+            tokens_sw = tokens_sw[1:]
             tokens_mask = tokens_mask[1:]
             labels = labels[1:]
+            pred = pred[1:]
 
-            if tokens[-1] == '[SEP]':
-                pred = pred[:-1]
-                tokens_mask = tokens_mask[:-1]
-                labels = labels[:-1]
-            else:
-                # subselect pred and mask down to length of tokens
-                pred = pred[0:len(tokens)]
-                tokens_mask = tokens_mask[0:len(tokens)]
-                labels = labels[0:len(tokens)]
+            # subselect pred and mask down to length of tokens
+            last_token = tokens.index('[SEP]')
+            tokens = tokens[:last_token]
+            tokens_sw = tokens_sw[:last_token]
+            tokens_mask = tokens_mask[:last_token]
+            labels = labels[:last_token]
+            pred = pred[:last_token]
 
-            if len(pred) == 0:
+            if len(tokens) == 0:
+                # no data for predictions
                 continue
 
             pred = [label_id_map[x] for x in pred]
