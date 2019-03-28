@@ -82,7 +82,7 @@ def sentence_spans(text):
         offset += len(token)
 
 
-def tokenize_sentence(text):
+def split_by_sentence(text):
     """
     Iterator that wraps nltk punkt sentence splitter.
     """
@@ -248,7 +248,7 @@ def main(args):
         # this creates a list of lists, each sub-list has 4 elements:
         #   example number, start index, end index, text of the example
         if args.method == 'sentence':
-            example = tokenize_sentence(text)
+            example = split_by_sentence(text)
         else:
             example = split_by_overlap(
                 text, args.bert_model,
