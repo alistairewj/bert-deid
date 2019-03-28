@@ -101,17 +101,8 @@ def split_by_sentence(text):
     return sentences
 
 
-def split_by_overlap(text, bert_model,
+def split_by_overlap(text, tokenizer,
                      token_step_size=20, max_seq_len=100):
-    # initialize bert tokenizer
-    if 'uncased' in bert_model:
-        do_lower_case = True
-    else:
-        do_lower_case = False
-
-    tokenizer = BertTokenizerNER.from_pretrained(
-        bert_model, do_lower_case=do_lower_case)
-
     # track offsets in tokenization
     tokens, tokens_sw, tokens_idx = tokenizer.tokenize(text)
 
@@ -239,6 +230,17 @@ def main(args):
     n = 0
     n_ex = 0
     n_ex_filtered = 0
+
+    if args.method == 'overlap':
+        # initialize bert tokenizer
+        if 'uncased' in args.bert_model:
+            do_lower_case = True
+        else:
+            do_lower_case = False
+
+        tokenizer = BertTokenizerNER.from_pretrained(
+            args.bert_model, do_lower_case=do_lower_case)
+
     for doc_id in records:
         # read PHI annotations
         df = pd.read_csv(os.path.join(ann_path, doc_id + '.gs'))
@@ -255,7 +257,7 @@ def main(args):
             example = split_by_sentence(text)
         else:
             example = split_by_overlap(
-                text, args.bert_model,
+                text, tokenizer,
                 token_step_size=args.step_size,
                 max_seq_len=args.sequence_length
             )
