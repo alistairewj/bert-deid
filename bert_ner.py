@@ -338,6 +338,7 @@ def prepare_tokens(tokens, tokens_sw, tokens_idx, label,
 
     label_map = {label: i for i, label in enumerate(label_list)}
 
+    segment_ids = [0] * len(tokens)
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
     # example.label is a list of start/stop offsets for tagged entities
@@ -427,7 +428,6 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
         tokens_sw = [0] + tokens_a_sw + [0]
         tokens_idx = [[-1]] + tokens_a_idx + [[-1]]
-        segment_ids = [0] * len(tokens)
 
         input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
             tokens, tokens_sw, tokens_idx, example.label,
