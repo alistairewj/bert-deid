@@ -182,7 +182,7 @@ def main():
     else:
         raise ValueError('Input file/folder %s does not exist.',
                          args.input)
-    
+
     logger.info("Parsing {} input file(s)".format(len(files)))
     tokens_all, tokens_sw_all, tokens_idx_all = [], [], []
     doc_id_all = []
@@ -204,14 +204,14 @@ def main():
             for row in csvreader:
                 # get start/stop/entity type
                 labels.append([int(row[2]), int(row[3]), row[5]])
-        #else:
+        # else:
         #    labels = []
 
         # split the text into sentences
         # this is a list of lists, each sub-list has 4 elements:
         #   sentence number, start index, end index, text of the sentence
         sentences = tokenize_sentence(text)
-        
+
         for sent in sentences:
             # track offsets in tokenization
             tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize(sent[3])
@@ -223,7 +223,7 @@ def main():
             # Account for [CLS] and [SEP] with "- 2"
             if len(tokens_a) > args.max_seq_length - 2:
                 n_splits = int(np.ceil(float(len(tokens_a)) /
-                                    (args.max_seq_length - 2)))
+                                       (args.max_seq_length - 2)))
                 len_split = int(np.ceil(len(tokens_a) / n_splits))
                 for j in range(n_splits):
                     start, stop = j*len_split, (j+1)*len_split
@@ -237,9 +237,9 @@ def main():
                         labels, label_list, args.max_seq_length, tokenizer)
 
                     eval_features.append(InputFeatures(input_ids=input_ids,
-                                                        input_mask=input_mask,
-                                                        segment_ids=segment_ids,
-                                                        label_ids=label_ids))
+                                                       input_mask=input_mask,
+                                                       segment_ids=segment_ids,
+                                                       label_ids=label_ids))
             else:
                 tokens_all.append(tokens_a)
                 tokens_sw_all.append(tokens_a_sw)
@@ -251,9 +251,9 @@ def main():
                     labels, label_list, args.max_seq_length, tokenizer)
 
                 eval_features.append(InputFeatures(input_ids=input_ids,
-                                                    input_mask=input_mask,
-                                                    segment_ids=segment_ids,
-                                                    label_ids=label_ids))
+                                                   input_mask=input_mask,
+                                                   segment_ids=segment_ids,
+                                                   label_ids=label_ids))
 
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_features))
@@ -290,7 +290,8 @@ def main():
 
     if args.conll:
         output_fn = "preds.conll"
-        logger.info("***** Outputting CoNLL format predictions to %s *****", output_fn)
+        logger.info(
+            "***** Outputting CoNLL format predictions to %s *****", output_fn)
         fp_output = open(output_fn, 'w')
 
     for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
