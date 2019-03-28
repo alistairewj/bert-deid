@@ -97,69 +97,14 @@ def tokenize_sentence(text):
     return sentences
 
 
-def split_by_sentence(df, text):
-    # split the text into sentences
-    # this is a list of lists, each sub-list has 4 elements:
-    #   sentence number, start index, end index, text of the sentence
-    sentences = tokenize_sentence(text)
-
-    # match annotations to the appropriate sentence
-    sIdx = 0
-    deid_info = [list() for x in range(len(sentences))]
-    for i, row in df.iterrows():
-        # go to the sentence which ends after this annotation begins
-        # [s][2] is the end offset of the sentence
-        deid_type = row['entity_type']
-
-        # HACK: ensure deid_types are members of a fixed set
-        """
-        if deid_type in ('Age > 89', 'Age_>_89'):
-            deid_type = 'Age'
-        elif deid_type == 'Nationality':
-            deid_type = 'Location'
-        elif deid_type in ('Protected Entity', 'Organization'):
-            deid_type = 'Protected_Entity'
-        deid_types.append(deid_type)
-        """
-
-        while sentences[sIdx][2] < row['start']:
-            sIdx += 1
-
-        s_start, s_stop = sentences[sIdx][1], sentences[sIdx][2]
-        if row['stop'] <= s_stop:
-            # add indices of annotated de-id
-            # adjust them based upon sentence start offset
-            deid_info[sIdx].append([
-                row['start'] - s_start,
-                row['stop'] - s_start,
-                deid_type
-            ])
-        else:
-            # if we are here, the PHI row starts in this sentence..
-            # but ends in the next sentence. this is an edge case.
-            # split the row annotation across the two sentences
-            deid_info[sIdx].append(
-                [row['start'] - s_start, s_stop - s_start, deid_type])
-
-            sIdx += 1
-            if sIdx >= len(deid_info):
-                # this can happen if the PHI tag includes newlines
-                # at the end of a document, which are not tokenized
-                # in this case, there are no more sentences to annotate
-                break
-            deid_info[sIdx].append(
-                [0, row['stop'] - sentences[sIdx][1], deid_type])
-
-    return sentences, deid_info
-
-
-def split_by_overlap(df, text, bert_model,
+def split_by_overlap(text, bert_model,
                      token_step_size=20, max_seq_len=100):
     # initialize bert tokenizer
     if 'uncased' in bert_model:
         do_lower_case = True
     else:
         do_lower_case = False
+
     tokenizer = BertTokenizerNER.from_pretrained(
         bert_model, do_lower_case=do_lower_case)
 
@@ -194,18 +139,25 @@ def split_by_overlap(df, text, bert_model,
     # create a list of lists, each sub-list has 4 elements:
     #   sentence number, start index, end index, text of the sentence
     examples = list()
-    annotations = list()
 
-    d_start = 0
     for i, (start, stop) in enumerate(seq_offsets):
         examples.append([i, start, stop, text[start:stop]])
+
+    return examples
+
+
+def create_ann(examples, df):
+    annotations = []
+    d_start = 0
+    for i in range(len(examples)):
+        start, stop = examples[i][1:3]
 
         # add de-id info
         deid_info = []
         # we rely on de-id being sorted in order of appearance
         d = d_start
 
-        for j, row in df.iloc[d:, :].iterrows():
+        for _, row in df.iloc[d:, :].iterrows():
             # check if we need to update d_start
             if row['stop'] < start:
                 # if the de-id annot ends before the text starts
@@ -240,7 +192,7 @@ def split_by_overlap(df, text, bert_model,
 
         annotations.append(deid_info)
 
-    return examples, annotations
+    return annotations
 
 
 def main(args):
@@ -292,14 +244,19 @@ def main(args):
         # keep track of number of records processed
         n += 1
 
-        # split the text into sentences
+        # split the text into individual examples
+        # this creates a list of lists, each sub-list has 4 elements:
+        #   example number, start index, end index, text of the example
         if args.method == 'sentence':
-            example, example_ann = split_by_sentence(df, text)
+            example = tokenize_sentence(text)
         else:
-            example, example_ann = split_by_overlap(
-                df, text, args.bert_model,
+            example = split_by_overlap(
+                text, args.bert_model,
                 token_step_size=args.step_size,
-                max_seq_len=args.sequence_length)
+                max_seq_len=args.sequence_length
+            )
+
+        example_ann = create_ann(example, df)
 
         len_example = len(example)
 
@@ -338,9 +295,17 @@ def main(args):
         print(f'  {n_ex_filtered} examples were filtered as they were empty.')
         print('Final dataset size: {}'.format(len(examples)))
 
+    # create sentence-wise deid format with all sentence data
+    output_dir = os.path.dirname(output_fn)
+    if not os.path.exists(output_dir):
+        if verbose_flag:
+            print(f'Creating directory {output_dir}')
+
+        os.makedirs(output_dir)
+
+    if verbose_flag:
         print(f'Outputting CSV dataset to {output_fn}')
 
-    # create sentence-wise deid format with all sentence data
     with open(output_fn, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',',
                                quotechar='"', quoting=csv.QUOTE_MINIMAL)
