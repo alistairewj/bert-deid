@@ -158,7 +158,7 @@ class DataProcessor(object):
 
 
 class DeidProcessor(DataProcessor):
-    """Processor for the gold standard de-id data set."""
+    """Processor for the de-id datasets with harmonized labels."""
 
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -174,8 +174,27 @@ class DeidProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ['Other', 'Date', 'Age', 'Name', 'Identifier',
-                'Contact', 'Protected_Entity']
+        return [
+            # names
+            'NAME',  # 'DOCTOR', 'PATIENT', 'USERNAME',
+            # professions
+            'PROFESSION',
+            # locations
+            'LOCATION',  # 'HOSPITAL', 'ORGANIZATION',
+            # 'STREET', 'STATE', 'CITY', 'COUNTRY', 'ZIP',
+            # 'LOCATION-OTHER',
+            # ages, including those over 89
+            'AGE',
+            # dates
+            'DATE',
+            # IDs
+            'ID',
+            # 'BIOID', 'DEVICE',  'HEALTHPLAN',  'IDNUM', 'MEDICALRECORD',
+            'CONTACT',
+            # 'EMAIL', 'FAX', 'PHONE', 'URL', 'IPADDRESS'
+            # catch all object
+            'O'
+        ]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
