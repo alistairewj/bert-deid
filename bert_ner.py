@@ -173,28 +173,8 @@ class DeidProcessor(DataProcessor):
             self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
 
     def get_labels(self):
-        """See base class."""
-        return [
-            # names
-            'NAME',  # 'DOCTOR', 'PATIENT', 'USERNAME',
-            # professions
-            'PROFESSION',
-            # locations
-            'LOCATION',  # 'HOSPITAL', 'ORGANIZATION',
-            # 'STREET', 'STATE', 'CITY', 'COUNTRY', 'ZIP',
-            # 'LOCATION-OTHER',
-            # ages, including those over 89
-            'AGE',
-            # dates
-            'DATE',
-            # IDs
-            'ID',
-            # 'BIOID', 'DEVICE',  'HEALTHPLAN',  'IDNUM', 'MEDICALRECORD',
-            'CONTACT',
-            # 'EMAIL', 'FAX', 'PHONE', 'URL', 'IPADDRESS'
-            # catch all object
-            'O'
-        ]
+        # created by subclass!
+        raise NotImplementedError()
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -212,56 +192,25 @@ class DeidProcessor(DataProcessor):
         return examples
 
 
-class i2b2Processor(DataProcessor):
-    """Processor for the i2b2 de-id data set."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        logger.info("LOOKING AT {}".format(
-            os.path.join(data_dir, "train.tsv")))
-        return self._create_examples(
-            self._read_csv(os.path.join(data_dir, "train.csv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
+class i2b2DeidProcessor(DeidProcessor):
+    """Processor for deid using i2b2 labels."""
 
     def get_labels(self):
-        """See base class."""
         return [
-            # names
-            'DOCTOR', 'PATIENT', 'USERNAME',
-            # professions
-            'PROFESSION',
-            # locations
-            'HOSPITAL', 'ORGANIZATION',
-            'STREET', 'STATE', 'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
-            # age > 89
-            'AGE',
-            # dates
-            'DATE',
-            # IDs
-            'BIOID', 'DEVICE',  'HEALTHPLAN',  'IDNUM', 'MEDICALRECORD',
-            'EMAIL', 'FAX', 'PHONE', 'URL',
-            # catch all object
-            'O'
+            'NAME', 'LOCATION', 'AGE',
+            'DATE', 'ID', 'CONTACT', 'O',
+            'PROFESSION'
         ]
 
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
-            guid = "%s-%s" % (set_type, line[0])
-            text_a = line[1]
-            # dataset has stored labels as a list of offsets
-            # trust the data and call eval on the string
-            label = eval(line[2])
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, label=label))
-        return examples
+
+class hipaaDeidProcessor(DeidProcessor):
+    """Processor for deid using HIPAA labels."""
+
+    def get_labels(self):
+        return [
+            'NAME', 'LOCATION', 'AGE',
+            'DATE', 'ID', 'CONTACT', 'O'
+        ]
 
 
 class CoNLLProcessor(DataProcessor):
@@ -492,9 +441,11 @@ def main():
                         "bert-base-multilingual-cased, bert-base-chinese.")
     parser.add_argument("--task_name",
                         default=None,
-                        type=str,
                         required=True,
-                        help="The name of the task to train.")
+                        type=str,
+                        choices=['i2b2', 'hipaa', 'conll'],
+                        help=("The name of the task to train. "
+                              "Primarily defines the label set."))
     parser.add_argument("--output_dir",
                         default=None,
                         type=str,
@@ -587,9 +538,9 @@ def main():
         ptvsd.wait_for_attach()
 
     processors = {
-        "deid": DeidProcessor,
         "conll": CoNLLProcessor,
-        "i2b2": i2b2Processor
+        "hipaa": hipaaDeidProcessor,
+        "i2b2": i2b2DeidProcessor
     }
 
     if args.local_rank == -1 or args.no_cuda:
