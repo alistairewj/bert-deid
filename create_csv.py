@@ -19,39 +19,43 @@ from tokenization import BertTokenizerNER
 # ln -s ../deid-gs/utils
 from utils.describe_data import harmonize_label
 
-parser = argparse.ArgumentParser(description='Convert i2b2 annotations')
-parser.add_argument('-i', '--input', type=str,
-                    default=None, required=True,
-                    help='folder with ann and txt subfolders')
-parser.add_argument('-o', '--output', type=str,
-                    default=None, required=True,
-                    help=('Filename of CSV to output all data to.'
-                          ' (default: do not create a CSV.)'))
 
-# optional arguments
-parser.add_argument('-g', '--group-tags', action='store_true',
-                    help='group tags into categories.')
-parser.add_argument('-m', '--method', type=str,
-                    default='sentence',
-                    choices=['sentence', 'overlap'],
-                    help='method for splitting text into individual examples.')
-parser.add_argument('--step-size', type=int,
-                    default=20,
-                    help='if method is overlap, the token step size to use.')
-parser.add_argument('--sequence-length', type=int,
-                    default=100,
-                    help='if method is overlap, the maximum token length.')
-parser.add_argument("--bert_model", type=str,
-                    default="bert-base-cased",
-                    choices=[
-                        "bert-base-uncased", "bert-base-cased",
-                        "bert-large-uncased", "bert-large-cased",
-                        "bert-base-multilingual-uncased",
-                        "bert-base-multilingual-cased",
-                        "bert-base-chinese"],
-                    help="BERT pre-trained model for tokenization")
-parser.add_argument('-q', '--quiet', action='store_true',
-                    help='suppress peasants discussing their work')
+def argparser(args):
+    parser = argparse.ArgumentParser(description='Convert i2b2 annotations')
+    parser.add_argument('-i', '--input', type=str,
+                        default=None, required=True,
+                        help='folder with ann and txt subfolders')
+    parser.add_argument('-o', '--output', type=str,
+                        default=None, required=True,
+                        help=('Filename of CSV to output all data to.'
+                              ' (default: do not create a CSV.)'))
+
+    # optional arguments
+    parser.add_argument('-g', '--group-tags', action='store_true',
+                        help='group tags into categories.')
+    parser.add_argument('-m', '--method', type=str,
+                        default='sentence',
+                        choices=['sentence', 'overlap'],
+                        help='method for splitting text into individual examples.')
+    parser.add_argument('--step-size', type=int,
+                        default=20,
+                        help='if method is overlap, the token step size to use.')
+    parser.add_argument('--sequence-length', type=int,
+                        default=100,
+                        help='if method is overlap, the maximum token length.')
+    parser.add_argument("--bert_model", type=str,
+                        default="bert-base-cased",
+                        choices=[
+                            "bert-base-uncased", "bert-base-cased",
+                            "bert-large-uncased", "bert-large-cased",
+                            "bert-base-multilingual-uncased",
+                            "bert-base-multilingual-cased",
+                            "bert-base-chinese"],
+                        help="BERT pre-trained model for tokenization")
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='suppress peasants discussing their work')
+
+    return parser.parse_args(args)
 
 
 # our dataframe will have consistent columns
@@ -196,7 +200,7 @@ def create_ann(examples, df):
 
 
 def main(args):
-    args = parser.parse_args(args)
+    args = argparser(args)
 
     input_path = args.input
     output_fn = args.output
