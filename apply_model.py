@@ -46,6 +46,11 @@ def main():
                         required=True,
                         help=("The input data. Either a single text file, "
                               "or a folder containing .txt files"))
+    parser.add_argument("--model_dir",
+                        default=None,
+                        type=str,
+                        required=True,
+                        help="The directory where the model checkpoints are.")
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         choices=[
                             "bert-base-uncased", "bert-base-cased",
@@ -59,12 +64,6 @@ def main():
                         type=str,
                         required=True,
                         help="The name of the task to train.")
-    parser.add_argument("--output_dir",
-                        default=None,
-                        type=str,
-                        required=True,
-                        help=("The output directory where the model "
-                              "predictions and checkpoints will be written."))
 
     parser.add_argument('-m', '--method', type=str,
                         default='sentence',
@@ -129,17 +128,17 @@ def main():
         args.bert_model, do_lower_case=args.do_lower_case)
 
     # load trained model
-    output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-    output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+    output_model_file = os.path.join(args.model_dir, WEIGHTS_NAME)
+    output_config_file = os.path.join(args.model_dir, CONFIG_NAME)
     if os.path.exists(output_model_file) & os.path.exists(output_config_file):
         # Load a trained model and config that you have fine-tuned
-        print(f'Loading model and configuration from {args.output_dir}.')
+        print(f'Loading model and configuration from {args.model_dir}.')
         config = BertConfig(output_config_file)
         model = BertForNER(config, num_labels=num_labels)
         model.load_state_dict(torch.load(output_model_file))
     else:
         raise ValueError('Folder %s did not have model and config file.',
-                         args.output_dir)
+                         args.model_dir)
 
     model.to(device)
 
