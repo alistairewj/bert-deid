@@ -3,9 +3,15 @@
 Code to fine-tune BERT on a medical note de-identification task.
 
 
+## Quickstart
+
 CoNLL:
 
 `python bert_ner.py --data_dir conll --bert_model bert-base-cased --task_name conll --output_dir conll_model --do_train --do_eval`
+
+i2b2 2014:
+
+`CUDA_VISIBLE_DEVICES=0 python bert_ner.py --data_dir i2b2_2014 --bert_model bert-base-uncased --task_name i2b2 --output_dir i2b2_2014_model --max_seq_length=128 --do_train --train_batch_size 128 --num_train_epochs 5 --warmup_proportion=0.4 --do_eval --output_predictions --eval_batch_size 128`
 
 ## i2b2
 
