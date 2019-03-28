@@ -338,6 +338,8 @@ def prepare_tokens(tokens, tokens_sw, tokens_idx, label,
 
     label_map = {label: i for i, label in enumerate(label_list)}
 
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
     # example.label is a list of start/stop offsets for tagged entities
     # use this to create list of labels for each token
     # assumes labels are ordered
