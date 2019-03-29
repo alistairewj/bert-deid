@@ -31,6 +31,11 @@ def argparser(args):
                               ' (default: do not create a CSV.)'))
 
     # optional arguments
+    parser.add_argument("--task_name",
+                        default='i2b2',
+                        type=str,
+                        choices=['i2b2', 'hipaa'],
+                        help="Defines the label set.")
     parser.add_argument('-g', '--group-tags', action='store_true',
                         help='group tags into categories.')
     parser.add_argument('-m', '--method', type=str,
@@ -290,7 +295,7 @@ def main(args):
                 for k in range(len(example_ann[i])):
                     # update the entity (element 2) using label_to_type dict
                     example_ann[i][k][2] = harmonize_label(
-                        example_ann[i][k][2])
+                        example_ann[i][k][2], grouping=args.task_name)
         # save to master list
         examples.extend(example)
         annotations.extend(example_ann)
