@@ -29,6 +29,7 @@ from tokenization import BertTokenizerNER
 import bert_ner
 from bert_ner import prepare_tokens, BertForNER, InputFeatures
 from create_csv import split_by_overlap, split_by_sentence
+from utils import harmonize_label
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -60,10 +61,12 @@ def main():
                             "bert-base-chinese"],
                         help="BERT pre-trained model")
     parser.add_argument("--task_name",
-                        default=None,
-                        type=str,
+                        default='i2b2',
                         required=True,
-                        help="The name of the task to train.")
+                        type=str,
+                        choices=['i2b2', 'hipaa'],
+                        help=("The name of the task to train. "
+                              "Primarily defines the label set."))
 
     parser.add_argument('-m', '--method', type=str,
                         default='sentence',
@@ -188,8 +191,13 @@ def main():
             for row in csvreader:
                 # get start/stop/entity type
                 labels.append([int(row[2]), int(row[3]), row[5]])
-        # else:
-        #    labels = []
+
+        # if requested, harmonize tags using fixed dictionary
+        if args.group_tags:
+            # for each example
+            for i in range(len(labels)):
+                labels[i][2] = harmonize_label(
+                    labels[i][2], grouping='hipaa')
 
         # split the text into sentences
         # this is a list of lists, each sub-list has 4 elements:
