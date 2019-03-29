@@ -180,6 +180,7 @@ def main():
     eval_features = []
 
     # load text
+    n = 0
     for i, f in enumerate(doc_id):
         with open(os.path.join(input_path, f + '.txt'), 'r') as fp:
             text = ''.join(fp.readlines())
@@ -213,7 +214,6 @@ def main():
                 max_seq_len=args.sequence_length
             )
 
-        n = 0
         for e, example in enumerate(examples):
             # track offsets in tokenization
             tokens, tokens_sw, tokens_idx = tokenizer.tokenize(
