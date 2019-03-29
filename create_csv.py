@@ -123,7 +123,7 @@ def split_by_overlap(text, tokenizer,
     np.maximum.accumulate(idx, axis=0, out=idx)
     tokens_start[mask] = tokens_start[idx[mask]]
 
-    if len(tokens) < max_seq_len:
+    if len(tokens) <= max_seq_len:
         # very short text - only create one example
         seq_offsets = [[tokens_start[0], len(text)]]
     else:
