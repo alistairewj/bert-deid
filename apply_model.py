@@ -29,7 +29,7 @@ from tokenization import BertTokenizerNER
 import bert_ner
 from bert_ner import prepare_tokens, BertForNER, InputFeatures
 from create_csv import split_by_overlap, split_by_sentence
-from utils import harmonize_label
+from utils.describe_data import harmonize_label
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
