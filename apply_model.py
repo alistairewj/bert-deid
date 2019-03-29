@@ -100,8 +100,10 @@ def main():
     parser.add_argument("--no_cuda",
                         action='store_true',
                         help="Whether not to use CUDA when available")
-    parser.add_argument('--conll', action='store_true',
-                        help="Output predictions in CoNLL format.")
+    parser.add_argument('--output-conll',
+                        default=None,
+                        type=str,
+                        help="Output predictions to file in CoNLL format.")
 
     args = parser.parse_args()
 
@@ -303,8 +305,10 @@ def main():
         'Must use sequential sampler if outputting predictions'
     n = 0
 
-    if args.conll:
-        output_fn = "preds.conll"
+    output_conll_flag = False
+    if args.output_conll is not None:
+        output_conll_flag = True
+        output_fn = args.output_conll
         logger.info(
             "***** Outputting CoNLL format predictions to %s *****", output_fn)
         fp_output = open(output_fn, 'w')
@@ -386,7 +390,7 @@ def main():
                 start = tokens_idx[k][0]
                 stop = tokens_idx[k][-1] + 1
 
-                if args.conll:
+                if output_conll_flag:
                     # output conll format
                     row = [
                         tokens[k],
@@ -404,14 +408,14 @@ def main():
                 y_pred.append(
                     [doc_id_all[n+j], start, stop, tokens[k], pred[k]])
 
-            if args.conll:
+            if output_conll_flag:
                 # add extra blank line
                 fp_output.write('\n')
 
         n += input_ids.shape[0]
 
     # close conll file
-    if args.conll:
+    if output_conll_flag:
         fp_output.close()
 
     output_fn = os.path.join("bert_preds")
