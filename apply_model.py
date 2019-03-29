@@ -213,6 +213,7 @@ def main():
                 max_seq_len=args.sequence_length
             )
 
+        n = 0
         for e, example in enumerate(examples):
             # track offsets in tokenization
             tokens, tokens_sw, tokens_idx = tokenizer.tokenize(
@@ -258,7 +259,7 @@ def main():
                                                segment_ids=segment_ids,
                                                label_ids=label_ids))
 
-            if (i == 0) & (e < 5):
+            if n < 5:
                 logger.info("*** Example ***")
                 logger.info("guid: %s" % (f'{f}-{e}'))
                 logger.info("tokens: %s" % " ".join(
@@ -271,6 +272,7 @@ def main():
                     "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
                 logger.info("label_ids: %s" %
                             " ".join([str(x) for x in label_ids]))
+                n += 1
 
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_features))
