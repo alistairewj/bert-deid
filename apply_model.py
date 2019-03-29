@@ -106,9 +106,9 @@ def main():
     args = parser.parse_args()
 
     processors = {
-        "deid": bert_ner.DeidProcessor,
         "conll": bert_ner.CoNLLProcessor,
-        "i2b2": bert_ner.i2b2Processor
+        "hipaa": bert_ner.hipaaDeidProcessor,
+        "i2b2": bert_ner.i2b2DeidProcessor
     }
 
     if args.no_cuda:
@@ -192,12 +192,12 @@ def main():
                 # get start/stop/entity type
                 labels.append([int(row[2]), int(row[3]), row[5]])
 
-        # if requested, harmonize tags using fixed dictionary
-        if args.group_tags:
-            # for each example
+        # harmonize tags using fixed dictionary
+        # for each example
+        if args.task_name in ('hipaa', 'i2b2'):
             for i in range(len(labels)):
                 labels[i][2] = harmonize_label(
-                    labels[i][2], grouping='hipaa')
+                    labels[i][2], grouping=args.task_name)
 
         # split the text into sentences
         # this is a list of lists, each sub-list has 4 elements:
