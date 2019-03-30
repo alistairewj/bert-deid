@@ -324,7 +324,7 @@ def main():
         output_pred_flag = True
         output_pred_fn = args.output_pred
         logger.info(
-            "***** Outputting CoNLL format predictions to %s *****", output_fn)
+            "***** Outputting CoNLL format predictions to %s *****", output_pred_fn)
         fp_pred = open(output_pred_fn, 'w')
 
     for input_ids, input_mask, segment_ids, label_ids in tqdm(
