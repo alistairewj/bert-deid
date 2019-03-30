@@ -104,6 +104,10 @@ def main():
                         default=None,
                         type=str,
                         help="Output predictions to file in CoNLL format.")
+    parser.add_argument('--output-pred',
+                        default=None,
+                        type=str,
+                        help="Output vector of predictions in pseudo-CoNLL format.")
 
     args = parser.parse_args()
 
@@ -312,8 +316,16 @@ def main():
         output_conll_flag = True
         output_fn = args.output_conll
         logger.info(
+            "***** Outputting CoNLL format predicted entities to %s *****", output_fn)
+        fp_conll = open(output_fn, 'w')
+
+    output_pred_flag = False
+    if args.output_pred is not None:
+        output_pred_flag = True
+        output_pred_fn = args.output_pred
+        logger.info(
             "***** Outputting CoNLL format predictions to %s *****", output_fn)
-        fp_output = open(output_fn, 'w')
+        fp_pred = open(output_pred_fn, 'w')
 
     for input_ids, input_mask, segment_ids, label_ids in tqdm(
             eval_dataloader, desc="Evaluating"):
@@ -340,6 +352,7 @@ def main():
             tokens_mask = list(idx[j, :])
             labels = label_ids[j, :].tolist()
             pred = yhat[j, :].tolist()
+            scores = logits[j, :, :].tolist()
 
             # remove [CLS] at beginning
             tokens = tokens[1:]
@@ -347,6 +360,7 @@ def main():
             tokens_mask = tokens_mask[1:]
             labels = labels[1:]
             pred = pred[1:]
+            scores = scores[1:]
 
             # subselect pred and mask down to length of tokens
             last_token = tokens.index('[SEP]')
@@ -355,6 +369,7 @@ def main():
             tokens_mask = tokens_mask[:last_token]
             labels = labels[:last_token]
             pred = pred[:last_token]
+            scores = scores[:last_token]
 
             if len(tokens) == 0:
                 # no data for predictions
@@ -376,6 +391,7 @@ def main():
                     token_add = tokens.pop(k)
                     tokens[k-1] = tokens[k-1] + token_add[2:]
                     # remove the token from other lists
+                    scores.pop(k)
                     pred.pop(k)
                     tokens_sw.pop(k)
                     labels.pop(k)
@@ -402,8 +418,26 @@ def main():
                         label_id_map[labels[k]],
                         pred[k]
                     ]
-                    fp_output.write(' '.join(row) + '\n')
+                    fp_conll.write(' '.join(row) + '\n')
 
+                if output_pred_flag:
+                    # output conll format
+                    row = [
+                        tokens[k],
+                        doc_id_all[n+j],
+                        str(start),
+                        str(stop),
+                        label_id_map[labels[k]],
+                        pred[k]
+                    ]
+                    fp_pred.write(' '.join(row) + ' ')
+
+                    # output vector of predictions
+                    fp_pred.write(' '.join([str(x) for x in scores[k]]) + '\n')
+
+                    if k == (len(pred)-1):
+                        # extra newline for end of token
+                        fp_pred.write('\n')
                 if pred[k] == 'O':
                     continue
 
@@ -412,13 +446,20 @@ def main():
 
             if output_conll_flag:
                 # add extra blank line
-                fp_output.write('\n')
+                fp_conll.write('\n')
+
+            if output_pred_flag:
+                # add extra blank line
+                fp_pred.write('\n')
 
         n += input_ids.shape[0]
 
     # close conll file
     if output_conll_flag:
-        fp_output.close()
+        fp_conll.close()
+
+    if output_pred_flag:
+        fp_pred.close()
 
     output_fn = os.path.join("bert_preds")
     logger.info("***** Outputting predictions to %s *****", output_fn)
