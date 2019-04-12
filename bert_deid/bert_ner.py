@@ -42,7 +42,7 @@ from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
-from tokenization import BertTokenizerNER
+from bert_deid.tokenization import BertTokenizerNER
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',

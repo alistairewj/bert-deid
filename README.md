@@ -2,6 +2,10 @@
 
 Code to fine-tune BERT on a medical note de-identification task.
 
+```
+python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
+```
+
 
 ## Quickstart
 

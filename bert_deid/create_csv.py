@@ -13,11 +13,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-from tokenization import BertTokenizerNER
-
-# must have describe_data module from deid-gs
-# ln -s ../deid-gs/utils
-from utils.describe_data import harmonize_label
+from bert_deid.tokenization import BertTokenizerNER
+from bert_deid.describe_data import harmonize_label
 
 
 def argparser(args):
