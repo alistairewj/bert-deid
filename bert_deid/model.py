@@ -13,10 +13,7 @@ from bert_deid.tokenization import BertTokenizerNER
 
 
 class BertForDEID(BertForNER):
-    """BERT model for deidentification.
-    Essentially identical to BertForTokenClassification, but ignores
-    labels with an index of -1 in the loss function.
-    """
+    """BERT model for deidentification."""
 
     def __init__(self, model_dir):
         self.labels = [
@@ -118,9 +115,6 @@ class BertForDEID(BertForNER):
             # convert to list // get the first element as we have only 1 example
             scores = logits.tolist()[0]
             pred = np.argmax(logits, axis=-1).tolist()[0]
-
-            # mask out (1) padding and (2) subwords
-            sw_idx = np.array(tokens_sw) == 1
 
             # remove [CLS] at beginning
             tokens = tokens[1:]
