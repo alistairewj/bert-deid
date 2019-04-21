@@ -1,5 +1,6 @@
 """Class for applying BERT-deid on text."""
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -50,6 +51,13 @@ class BertForDEID(BertForNER):
         # CPU probably faster, avoids overhead
         device = torch.device("cpu")
         self.to(device)
+
+        # for post-fixes
+
+        # lower case obvious false positives
+        self.fp_words = set(['swan-ganz', 'swan ganz',
+                             'carina', 'dobbhoff', 'shiley',
+                             'hcc', 'kerley', 'technologist'])
 
     def _prepare_tokens(self, tokens, tokens_sw, tokens_idx):
         segment_ids = [0] * len(tokens)
@@ -186,3 +194,32 @@ class BertForDEID(BertForNER):
                                          'comment', 'confidence'])
 
         return df
+
+    def postfix(self, df, text):
+        """Post-hoc corrections using rules.
+        Designed using radiology reports."""
+        idxKeep = list()
+        for i, row in df.iterrows():
+            if row['entity'].lower() in self.fp_words:
+                continue
+
+            if 'swan' in row['entity'].lower():
+                if text[row['start']:row['start']+9].lower() in self.fp_words:
+                    continue
+
+            if row['entity_type'].lower() == 'age':
+                # remove 'M' or 'F' from entities
+                if (len(row['entity']) == 3) & (row['entity'][-1].lower() in ('m', 'f')):
+                    df.loc[i, 'stop'] -= 1
+                    df.loc[i, 'entity'] = df.loc[i, 'entity'][0:-1]
+            elif row['entity_type'].lower() == 'date':
+                # remove dates which are from bulleted lists
+                if re.search(r'\n [0-9][.)] ', text[row['start']-2:row['stop']+2]):
+                    continue
+            elif row['entity_type'].lower() == 'location':
+                if row['entity'].lower() in ['ge', 'hickman', 'carina']:
+                    continue
+
+            idxKeep.append(i)
+
+        return df.loc[idxKeep, :]
