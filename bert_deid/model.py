@@ -38,7 +38,7 @@ class BertForDEID(BertForNER):
             print(f'Loading model and configuration from {model_dir}.')
             config = BertConfig(config_file)
             super(BertForDEID, self).__init__(config, self.num_labels)
-            self.load_state_dict(torch.load(model_file))
+            self.load_state_dict(torch.load(model_file, map_location="cpu"))
         else:
             raise ValueError('Folder %s did not have model and config file.',
                              model_dir)
@@ -176,7 +176,7 @@ class BertForDEID(BertForNER):
                     # document_id,annotation_id,annotator
                     document_id, f'bert.{e}.{k}', self.bert_model,
                     # start,stop
-                    str(start), str(stop),
+                    start, stop,
                     # entity
                     tokens[k],
                     # entity_type (prediction)
@@ -184,7 +184,7 @@ class BertForDEID(BertForNER):
                     # comment
                     None,
                     # confidence - the score assigned by bert
-                    str(scores[k][pred[k]])
+                    scores[k][pred[k]]
                 ]
                 anns.append(row)
 
@@ -192,6 +192,8 @@ class BertForDEID(BertForNER):
                                          'annotator', 'start', 'stop',
                                          'entity', 'entity_type',
                                          'comment', 'confidence'])
+        df['start'] = df['start'].astype(int)
+        df['stop'] = df['stop'].astype(int)
 
         return df
 
