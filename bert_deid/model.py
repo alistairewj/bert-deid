@@ -200,23 +200,6 @@ class BertForDEID(BertForNER):
 
         return df
 
-    def apply(self, text, **kwargs):
-        """Deidentify the input text.
-
-        Args:
-            text (str): Text to be deidentified.
-
-        Returns:
-            text, deidentified
-
-        Examples:
-            >>> text = 'Radiographs dated 01/01/2001.'
-            >>> scrubbed_text = model.apply(text)
-        """
-        annotations = self.annotate(text, **kwargs)
-
-        return annotation.apply(annotations, text)
-
     def postfix(self, df, text):
         """Post-hoc corrections using rules.
         Designed using radiology reports."""
