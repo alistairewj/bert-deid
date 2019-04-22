@@ -7,6 +7,7 @@ import pandas as pd
 
 import torch
 from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from pydeid import annotation
 
 from bert_deid.bert_ner import BertForNER
 from bert_deid.create_csv import split_by_overlap
@@ -127,6 +128,7 @@ class BertForDEID(BertForNER):
             # remove [CLS] at beginning
             tokens = tokens[1:]
             tokens_sw = tokens_sw[1:]
+            tokens_idx = tokens_idx[1:]
             pred = pred[1:]
             scores = scores[1:]
 
@@ -134,6 +136,7 @@ class BertForDEID(BertForNER):
             last_token = tokens.index('[SEP]')
             tokens = tokens[:last_token]
             tokens_sw = tokens_sw[:last_token]
+            tokens_idx = tokens_idx[:last_token]
             pred = pred[:last_token]
             scores = scores[:last_token]
 
