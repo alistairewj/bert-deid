@@ -108,6 +108,9 @@ def split_by_overlap(text, tokenizer,
     # track offsets in tokenization
     tokens, tokens_sw, tokens_idx = tokenizer.tokenize(text)
 
+    if len(tokens_idx) == 0:
+        # no tokens found, return empty list
+        return []
     # get start index of each token
     tokens_start = [x[0] for x in tokens_idx]
     tokens_start = np.array(tokens_start)
@@ -251,6 +254,10 @@ def main(args):
 
         # keep track of number of records processed
         n += 1
+
+        # filter text which is entirely newline/space
+        if text.isspace():
+            continue
 
         # split the text into individual examples
         # this creates a list of lists, each sub-list has 4 elements:
