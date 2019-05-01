@@ -256,7 +256,7 @@ def main(args):
         n += 1
 
         # filter text which is entirely newline/space
-        if text.isspace():
+        if (len(text) == 0) or text.isspace():
             continue
 
         # split the text into individual examples
