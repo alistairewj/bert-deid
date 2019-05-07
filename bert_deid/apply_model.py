@@ -25,10 +25,11 @@ from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NA
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
 from bert_deid.tokenization import BertTokenizerNER
-from bert_deid import bert_ner
+from bert_deid import bert_ner, processors
 from bert_deid.bert_ner import prepare_tokens, BertForNER, InputFeatures
 from bert_deid.create_csv import split_by_overlap, split_by_sentence
 from bert_deid.describe_data import harmonize_label
+from bert_deid.bert_multilabel import BertMultiLabel
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -63,7 +64,7 @@ def main():
                         default='i2b2',
                         required=True,
                         type=str,
-                        choices=['i2b2', 'hipaa'],
+                        choices=['i2b2', 'hipaa', 'radreportlabel'],
                         help=("The name of the task to train. "
                               "Primarily defines the label set."))
 
@@ -110,10 +111,11 @@ def main():
 
     args = parser.parse_args()
 
-    processors = {
-        "conll": bert_ner.CoNLLProcessor,
-        "hipaa": bert_ner.hipaaDeidProcessor,
-        "i2b2": bert_ner.i2b2DeidProcessor
+    processors_dict = {
+        "conll": processors.CoNLLProcessor,
+        "hipaa": processors.hipaaDeidProcessor,
+        "i2b2": processors.i2b2DeidProcessor,
+        "radreportlabel": processors.RadReportLabelProcessor
     }
 
     if args.no_cuda:
@@ -125,10 +127,10 @@ def main():
 
     task_name = args.task_name.lower()
 
-    if task_name not in processors:
+    if task_name not in processors_dict:
         raise ValueError("Task not found: %s" % (task_name))
 
-    processor = processors[task_name]()
+    processor = processors_dict[task_name]()
     label_list = processor.get_labels()
     num_labels = len(label_list)
 
@@ -142,7 +144,12 @@ def main():
         # Load a trained model and config that you have fine-tuned
         print(f'Loading model and configuration from {args.model_dir}.')
         config = BertConfig(output_config_file)
-        model = BertForNER(config, num_labels=num_labels)
+
+        if task_name == 'radreportlabel':
+            model = BertMultiLabel(config,  num_labels=num_labels)
+        else:
+            model = BertForNER(config, num_labels=num_labels)
+
         model.load_state_dict(torch.load(output_model_file))
     else:
         raise ValueError('Folder %s did not have model and config file.',
@@ -318,14 +325,6 @@ def main():
             "***** Outputting CoNLL format predicted entities to %s *****", output_fn)
         fp_conll = open(output_fn, 'w')
 
-    output_pred_flag = False
-    if args.output_pred is not None:
-        output_pred_flag = True
-        output_pred_fn = args.output_pred
-        logger.info(
-            "***** Outputting CoNLL format predictions to %s *****", output_pred_fn)
-        fp_pred = open(output_pred_fn, 'w')
-
     for input_ids, input_mask, segment_ids, label_ids in tqdm(
             eval_dataloader, desc="Evaluating"):
         input_ids = input_ids.to(device)
@@ -341,9 +340,12 @@ def main():
         idx = (input_mask.to('cpu').numpy() == 1) & (label_ids != -1)
         yhat = np.argmax(logits, axis=-1)
 
-        # convert predictions into doc_id, start, stop, type
+        y_pred.append(logits)
 
-        # add this batch to the y_true/y_pred lists
+        # convert predictions into doc_id, start, stop, type
+        if not args.output_conll:
+            continue
+
         for j in range(yhat.shape[0]):
             tokens = tokens_all[n+j]
             tokens_sw = tokens_sw_all[n+j]
@@ -407,49 +409,19 @@ def main():
                 start = tokens_idx[k][0]
                 stop = tokens_idx[k][-1] + 1
 
-                if output_conll_flag:
-                    # output conll format
-                    row = [
-                        tokens[k],
-                        doc_id_all[n+j],
-                        str(start),
-                        str(stop),
-                        label_id_map[labels[k]],
-                        pred[k]
-                    ]
-                    fp_conll.write(' '.join(row) + '\n')
+                # output conll format
+                row = [
+                    tokens[k],
+                    doc_id_all[n+j],
+                    str(start),
+                    str(stop),
+                    label_id_map[labels[k]],
+                    pred[k]
+                ]
+                fp_conll.write(' '.join(row) + '\n')
 
-                if output_pred_flag:
-                    # output conll format
-                    row = [
-                        tokens[k],
-                        doc_id_all[n+j],
-                        str(start),
-                        str(stop),
-                        label_id_map[labels[k]],
-                        pred[k]
-                    ]
-                    fp_pred.write(' '.join(row) + ' ')
-
-                    # output vector of predictions
-                    fp_pred.write(' '.join([str(x) for x in scores[k]]) + '\n')
-
-                    if k == (len(pred)-1):
-                        # extra newline for end of token
-                        fp_pred.write('\n')
-                if pred[k] == 'O':
-                    continue
-
-                y_pred.append(
-                    [doc_id_all[n+j], start, stop, tokens[k], pred[k]])
-
-            if output_conll_flag:
-                # add extra blank line
-                fp_conll.write('\n')
-
-            if output_pred_flag:
-                # add extra blank line
-                fp_pred.write('\n')
+            # add extra blank line
+            fp_conll.write('\n')
 
         n += input_ids.shape[0]
 
@@ -457,16 +429,12 @@ def main():
     if output_conll_flag:
         fp_conll.close()
 
-    if output_pred_flag:
-        fp_pred.close()
-
-    output_fn = os.path.join("bert_preds")
-    logger.info("***** Outputting predictions to %s *****", output_fn)
-    with open(output_fn, 'w') as fp_output:
-        out_writer = csv.writer(fp_output, delimiter=',',
-                                quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        for row in y_pred:
-            out_writer.writerow(row)
+    if args.output_pred is not None:
+        output_pred_fn = args.output_pred
+        logger.info(
+            "***** Outputting predictions to %s *****", output_pred_fn)
+        y_pred = np.concatenate(y_pred, 0)
+        np.savetxt(output_pred_fn, y_pred, delimiter=',')
 
 
 if __name__ == "__main__":
