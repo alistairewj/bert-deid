@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 import csv
+import re
 import itertools
 
 # must have installed punkt model
@@ -144,6 +145,50 @@ def split_by_overlap(text, tokenizer,
         examples.append([i, start, stop, text[start:stop]])
 
     return examples
+
+
+def split_report_into_sections(text):
+    p_section = re.compile(
+        r'\n ([A-Z ()/,-]+):\s', re.DOTALL)
+
+    sections = list()
+    section_names = list()
+    section_idx = list()
+
+    idx = 0
+    s = p_section.search(text, idx)
+
+    if s:
+        sections.append(text[0:s.start(1)])
+        section_names.append('preamble')
+        section_idx.append(0)
+
+        while s:
+            current_section = s.group(1).lower()
+            # get the start of the text for this section
+            idx_start = s.end()
+            # skip past the first newline to avoid some bad parses
+            idx_skip = text[idx_start:].find('\n')
+            if idx_skip == -1:
+                idx_skip = 0
+
+            s = p_section.search(text, idx_start + idx_skip)
+
+            if s is None:
+                idx_end = len(text)
+            else:
+                idx_end = s.start()
+
+            sections.append(text[idx_start:idx_end])
+            section_names.append(current_section)
+            section_idx.append(idx_start)
+
+    else:
+        sections.append(text)
+        section_names.append('full report')
+        section_idx.append(0)
+
+    return sections, section_names, section_idx
 
 
 def create_ann(examples, df):
