@@ -10,6 +10,7 @@ from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NA
 from pydeid import annotation
 
 from bert_deid.bert_ner import BertForNER
+from bert_deid.bert_multilabel import BertMultiLabel
 from bert_deid.create_csv import split_by_overlap
 from bert_deid.tokenization import BertTokenizerNER
 
@@ -17,7 +18,9 @@ from bert_deid.tokenization import BertTokenizerNER
 class BertForDEID(BertForNER):
     """BERT model for deidentification."""
 
-    def __init__(self, model_dir):
+    def __init__(self, model_dir,
+                 max_seq_length=100,
+                 token_step_size=100):
         self.labels = [
             'NAME', 'LOCATION', 'AGE',
             'DATE', 'ID', 'CONTACT', 'O',
@@ -29,8 +32,8 @@ class BertForDEID(BertForNER):
         self.do_lower_case = True
 
         # by default, we do non-overlapping segments of text
-        self.max_seq_length = 100
-        self.token_step_size = 100
+        self.max_seq_length = max_seq_length
+        self.token_step_size = token_step_size
 
         # load trained config/weights
         model_file = os.path.join(model_dir, WEIGHTS_NAME)
@@ -197,6 +200,25 @@ class BertForDEID(BertForNER):
                                          'comment', 'confidence'])
         df['start'] = df['start'].astype(int)
         df['stop'] = df['stop'].astype(int)
+
+        return df
+
+    def pool_annotations(self, df):
+        # pool token-wise annotations together
+        # this is necessary if overlapping examples are used
+        # i.e. self.token_step_size < self.sequence_length
+
+        # get location of maximally confident annotations
+        df_keep = df.groupby(['annotator', 'start', 'stop'])[
+            ['confidence']].max()
+        df_keep.reset_index(inplace=True)
+
+        # merge on these columns to remove rows with low confidence
+        grp_cols = list(df_keep.columns)
+        df = df.merge(df_keep, how='inner', on=grp_cols)
+
+        # if two rows had identical confidence, keep the first
+        df.drop_duplicates(subset=grp_cols, keep='first', inplace=True)
 
         return df
 
