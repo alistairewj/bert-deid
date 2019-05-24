@@ -208,6 +208,85 @@ def collect_records(input_path):
     return annotations, notes
 
 
+def pretty_print_report(text, text_start, start, stop, color_text):
+    # print colored text
+
+    # reset the color
+    print('\033[0m', end='')
+
+    print(text[text_start:start], end='')
+    # print text between start/stop in the format of our choice
+    print(color_text, end='')
+    print(text[start:stop], end='')
+
+    # reset the color
+    print('\033[0m', end='')
+
+    # update start so the next iteration prints it in normal color
+    return stop
+
+
+def pretty_print_comparison(text, deid, gs):
+    """
+    Prints a report, with identified PHI in green and missed PHI in bolded red.
+    """
+
+    # green
+    color_good = '\033[92m'
+
+    # bolded red
+    color_bad = '\033[91m\033[1m'
+
+    deid.sort_values(['start', 'stop'], inplace=True)
+    gs.sort_values(['start', 'stop'], inplace=True)
+
+    n_deid = deid.shape[0]
+    n_gs = gs.shape[0]
+
+    text_start = 0
+    i = 0  # deid iterator
+    g = 0  # gold standard iterator
+    d_start, d_stop = deid.iloc[i, :].values
+    g_start, g_stop = gs.iloc[g, :].values
+
+    while (g < n_gs) | (i < n_deid):
+
+        # where does the first instance of phi/deid start/stop
+        start = min(d_start, g_start)
+        stop = min(d_stop, g_stop)
+
+        # decide what color - if deid before gold standard, green
+        if d_start <= g_start:
+            print_color = color_good
+        else:
+            # if gold standard before deid, we missed it -> red
+            print_color = color_bad
+
+        # print text up to 'start' as normal
+        # print text between start/stop in the color of our choice
+        text_start = pretty_print_report(
+            text, text_start, start, stop, print_color
+        )
+
+        # update deid/gs offsets if we have passed them
+        if text_start >= g_stop:
+            g += 1
+            if g < n_gs:
+                g_start, g_stop = gs.iloc[g, :].values
+            else:
+                g_start, g_stop = len(text), len(text)
+
+        if text_start >= d_stop:
+            i += 1
+            if i < n_deid:
+                d_start, d_stop = deid.iloc[i, :].values
+            else:
+                d_start, d_stop = len(text), len(text)
+
+    if len(text) > text_start:
+        print(text[text_start:])
+
+
 def main(args):
     """
     Command line interface for summarizing a dataset.
