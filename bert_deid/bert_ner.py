@@ -162,7 +162,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
     features = []
     for (ex_index, example) in enumerate(examples):
         # track offsets in tokenization
-        tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize(
+        tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize_with_index(
             example.text_a)
 
         # Account for [CLS] and [SEP] with "- 2"

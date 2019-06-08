@@ -329,9 +329,10 @@ class BertTokenizerNER(BertTokenizer):
                          never_split=never_split)
 
     # overwrite the original tokenize with NER version tracking offsets
-    def tokenize(self, text):
+    def tokenize_with_index(self, text):
         """Segment each token into subwords while keeping track of
         token boundaries.
+
         Parameters
         ----------
         text: A single string to be tokenized.
@@ -382,6 +383,20 @@ class BertTokenizerNER(BertTokenizer):
             subword_offsets = [0] + \
                 [x for x in itertools.accumulate(subword_offsets[:-1])]
         return split_tokens, subword_flags, subword_offsets
+
+    def tokenize(self, text):
+        """Segment each token into subwords.
+
+        Parameters
+        ----------
+        text: A single string to be tokenized.
+
+        Returns
+        -------
+        A list of subwords
+        """
+        split_tokens, _, _ = self.tokenize_with_index(text)
+        return split_tokens
 
 
 class BasicTokenizer(object):

@@ -232,7 +232,7 @@ class BertForRadReportLabel(BertMultiLabel):
         #   sentence number, start index, end index, text of the sentence
         for e, example in enumerate(examples):
             # track offsets in tokenization
-            tokens, tokens_sw, tokens_idx = self.tokenizer.tokenize(
+            tokens, tokens_sw, tokens_idx = self.tokenizer.tokenize_with_index(
                 example[3])
 
             # offset index of predictions based upon example start

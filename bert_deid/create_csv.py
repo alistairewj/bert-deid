@@ -107,7 +107,7 @@ def split_by_sentence(text):
 def split_by_overlap(text, tokenizer,
                      token_step_size=20, max_seq_len=100):
     # track offsets in tokenization
-    tokens, tokens_sw, tokens_idx = tokenizer.tokenize(text)
+    tokens, tokens_sw, tokens_idx = tokenizer.tokenize_with_index(text)
 
     if len(tokens_idx) == 0:
         # no tokens found, return empty list
