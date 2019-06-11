@@ -156,6 +156,7 @@ def main():
                          args.model_dir)
 
     model.to(device)
+    model.eval()
 
     # if input is a single text file, wrap it in a list
     if os.path.exists(args.input):

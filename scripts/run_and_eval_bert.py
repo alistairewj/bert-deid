@@ -134,6 +134,13 @@ def main():
         # ensure folder exists
         if not os.path.exists(argparse_dict['brat_path']):
             os.makedirs(argparse_dict['brat_path'])
+        else:
+            # clear out files
+            for f in os.listdir(argparse_dict['brat_path']):
+                if f.endswith('.txt'):
+                    os.remove(os.path.join(argparse_dict['brat_path'], f))
+                elif f.endswith('.ann'):
+                    os.remove(os.path.join(argparse_dict['brat_path'], f))
 
         # add configuration files if needed to brat folder
         utils.add_brat_conf_files(argparse_dict['brat_path'])
@@ -170,6 +177,7 @@ def main():
                          argparse_dict['model_path'])
 
     bert_model.to(device)
+    bert_model.eval()
 
     # read files from folder
     if os.path.exists(argparse_dict['text_path']):

@@ -177,6 +177,7 @@ def main():
                          argparse_dict['model_path'])
 
     bert_model.to(device)
+    bert_model.eval()
 
     # check our file exists
     if os.path.exists(argparse_dict['text_path']):
