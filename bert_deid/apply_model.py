@@ -25,7 +25,7 @@ from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NA
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
 from bert_deid.tokenization import BertTokenizerNER
-from bert_deid import bert_ner, processors
+from bert_deid import processors
 from bert_deid.bert_ner import prepare_tokens, BertForNER, InputFeatures
 from bert_deid.create_csv import split_by_overlap, split_by_sentence
 from bert_deid.describe_data import harmonize_label
