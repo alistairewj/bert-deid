@@ -6,7 +6,7 @@ import logging
 import csv
 import argparse
 
-from bert_deid.describe_data import harmonize_label
+from bert_deid.create_csv import split_by_overlap
 from bert_deid import model, utils
 from pytorch_pretrained_bert.modeling import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.modeling import BertConfig
@@ -196,11 +196,24 @@ def main():
         raise ValueError('Input folder %s does not exist.',
                          argparse_dict['text_path'])
 
-    logger.info("***** Running evaluation *****")
-
     # load the text
     with open(input_fn, 'r') as fp:
         text = ''.join(fp.readlines())
+
+    logger.info("***** Running evaluation *****")
+
+    # create splits
+    examples = split_by_overlap(
+        text, bert_model.tokenizer,
+        token_step_size=bert_model.token_step_size,
+        max_seq_len=bert_model.max_seq_length
+    )
+
+    for e, example in enumerate(examples):
+        # track offsets in tokenization
+        tokens, tokens_sw, tokens_idx = bert_model.tokenizer.tokenize_with_index(
+            example[3])
+        logger.info("Sentence %d: %s", e+1, " ".join([str(x) for x in tokens]))
 
     # apply bert-deid
     df = bert_model.annotate(text, document_id=fn)
