@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """BERT finetuning runner."""
+# CUDA_VISIBLE_DEVICES=0 python bert_ner.py --data_path data/i2b2_2014 --bert_model bert-base-cased --task_name i2b2 --output_dir models/i2b2_2014_overlap_cased --max_seq_length=128 --do_train --train_batch_size 32 --num_train_epochs 3 --warmup_proportion=0.4 --seed 7841
 
 from __future__ import absolute_import, division, print_function
 
@@ -23,6 +24,7 @@ import csv
 import logging
 import os
 import random
+import sys
 
 import numpy as np
 import torch
@@ -241,15 +243,14 @@ def accuracy(out, labels):
     return np.sum(outputs == labels)
 
 
-def main():
+def main(args):
     parser = argparse.ArgumentParser()
-
-    # Required parameters
-    parser.add_argument("--data_dir",
+    parser.add_argument("--data_path",
                         default=None,
                         type=str,
                         required=True,
                         help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
+
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
@@ -261,7 +262,7 @@ def main():
                         choices=['i2b2', 'hipaa', 'conll'],
                         help=("The name of the task to train. "
                               "Primarily defines the label set."))
-    parser.add_argument("--output_dir",
+    parser.add_argument("--model_path",
                         default=None,
                         type=str,
                         required=True,
@@ -342,7 +343,7 @@ def main():
     # allow output of predictions
     parser.add_argument('--output_predictions', action='store_true',
                         help="Output predictions to file")
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     if args.server_ip and args.server_port:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
@@ -387,11 +388,11 @@ def main():
         raise ValueError(
             "At least one of `do_train` or `do_eval` must be True.")
 
-    if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train:
+    if os.path.exists(args.model_path) and os.listdir(args.model_path) and args.do_train:
         raise ValueError(
-            "Output directory ({}) already exists and is not empty.".format(args.output_dir))
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+            "Output directory ({}) already exists and is not empty.".format(args.model_path))
+    if not os.path.exists(args.model_path):
+        os.makedirs(args.model_path)
 
     task_name = args.task_name.lower()
 
@@ -408,7 +409,7 @@ def main():
     train_examples = None
     num_train_optimization_steps = None
     if args.do_train:
-        train_examples = processor.get_train_examples(args.data_dir)
+        train_examples = processor.get_train_examples(args.data_path)
         num_train_optimization_steps = int(
             len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
         if args.local_rank != -1:
@@ -546,17 +547,17 @@ def main():
         # Save a trained model and the associated configuration
         model_to_save = model.module if hasattr(
             model, 'module') else model  # Only save the model it-self
-        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
+        output_model_file = os.path.join(args.model_path, WEIGHTS_NAME)
         torch.save(model_to_save.state_dict(), output_model_file)
-        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+        output_config_file = os.path.join(args.model_path, CONFIG_NAME)
         with open(output_config_file, 'w') as f:
             f.write(model_to_save.config.to_json_string())
     else:
-        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+        output_model_file = os.path.join(args.model_path, WEIGHTS_NAME)
+        output_config_file = os.path.join(args.model_path, CONFIG_NAME)
         if os.path.exists(output_model_file) & os.path.exists(output_config_file):
             # Load a trained model and config that you have fine-tuned
-            print(f'Loading model and configuration from {args.output_dir}.')
+            print(f'Loading model and configuration from {args.model_path}.')
             config = BertConfig(output_config_file)
             model = BertForNER(config, num_labels=num_labels)
             model.load_state_dict(torch.load(output_model_file))
@@ -569,7 +570,7 @@ def main():
         model.to(device)
 
     if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        eval_examples = processor.get_dev_examples(args.data_dir)
+        eval_examples = processor.get_dev_examples(args.data_path)
         eval_features = convert_examples_to_features(
             eval_examples, label_list, args.max_seq_length, tokenizer)
         logger.info("***** Running evaluation *****")
@@ -613,7 +614,7 @@ def main():
             assert type(eval_sampler) == SequentialSampler, \
                 'Must use sequential sampler if outputting predictions'
 
-            output_fn = os.path.join(args.output_dir, "eval_predictions.csv")
+            output_fn = os.path.join(args.model_path, "eval_predictions.csv")
             logger.info("***** Outputting predictions to %s *****", output_fn)
             fp_output = open(output_fn, 'w')
             out_writer = csv.writer(fp_output, delimiter=',',
@@ -698,7 +699,7 @@ def main():
             stats['f1'][lbl] = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
             result[lbl + '_f1'] = stats['f1'][lbl]
 
-        output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
+        output_eval_file = os.path.join(args.model_path, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results *****")
             for key in sorted(result.keys()):
@@ -724,4 +725,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

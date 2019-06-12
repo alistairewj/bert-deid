@@ -5,6 +5,7 @@ import sys
 import csv
 import re
 import itertools
+import json
 
 # must have installed punkt model
 # import nltk
@@ -20,12 +21,27 @@ from bert_deid.describe_data import harmonize_label
 
 def argparser(args):
     parser = argparse.ArgumentParser(description='Convert i2b2 annotations')
-    parser.add_argument('-i', '--input', type=str,
+
+    parser.add_argument("--input_path",
+                        default=None,
+                        type=str,
+                        help=("Input path with a txt"
+                              " and ann subfolder."))
+
+    parser.add_argument("--text_extension",
+                        default='txt',
+                        type=str,
+                        help=("Extension for input files in input folder "
+                              "(default: txt)"))
+    parser.add_argument("--ref_extension",
+                        default='gs',
+                        type=str,
+                        help=("Extension for gold standard files in"
+                              " ref folder (default: gs)"))
+
+    parser.add_argument('-d', '--data_path', type=str,
                         default=None, required=True,
-                        help='folder with ann and txt subfolders')
-    parser.add_argument('-o', '--output', type=str,
-                        default=None, required=True,
-                        help=('Filename of CSV to output all data to.'
+                        help=('Folder to output CSV of all data to.'
                               ' (default: do not create a CSV.)'))
 
     # optional arguments
@@ -34,16 +50,16 @@ def argparser(args):
                         type=str,
                         choices=['i2b2', 'hipaa'],
                         help="Defines the label set.")
-    parser.add_argument('-g', '--group-tags', action='store_true',
+    parser.add_argument('-g', '--group_tags', action='store_true',
                         help='group tags into categories.')
     parser.add_argument('-m', '--method', type=str,
                         default='sentence',
                         choices=['sentence', 'overlap'],
                         help='method for splitting text into individual examples.')
-    parser.add_argument('--step-size', type=int,
+    parser.add_argument('--step_size', type=int,
                         default=20,
                         help='if method is overlap, the token step size to use.')
-    parser.add_argument('--sequence-length', type=int,
+    parser.add_argument('--sequence_length', type=int,
                         default=100,
                         help='if method is overlap, the maximum token length.')
     parser.add_argument("--bert_model", type=str,
@@ -243,8 +259,12 @@ def create_ann(examples, df):
 def main(args):
     args = argparser(args)
 
-    input_path = args.input
-    output_fn = args.output
+    input_path = args.input_path
+    output_fn = input_path.split(os.sep)[-1]
+    output_fn = os.path.join(
+        args.data_path, f'{output_fn}.csv'
+    )
+
     verbose_flag = not args.quiet
 
     # check input folders exist
