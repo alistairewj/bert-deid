@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 
 import torch
-from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
-from pydeid import annotation
+from torch.nn import CrossEntropyLoss
 
-from bert_deid.bert_multilabel import BertMultiLabel
+from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from pytorch_pretrained_bert.modeling import BertForTokenClassification
+
 from bert_deid.create_csv import split_by_overlap
 from bert_deid.tokenization import BertTokenizerNER
 
@@ -17,39 +18,6 @@ from bert_deid.tokenization import BertTokenizerNER
 def segment_ids(self, segment1_len, segment2_len):
     ids = [0] * segment1_len + [1] * segment2_len
     return torch.tensor([ids]).to(device=self.device)
-
-
-class BertForNER(BertForTokenClassification):
-    """BERT model for neural entity recognition.
-    Essentially identical to BertForTokenClassification, but ignores
-    labels with an index of -1 in the loss function.
-    """
-
-    def __init__(self, config, num_labels):
-        super(BertForNER, self).__init__(config, num_labels)
-
-    def forward(self, input_ids,
-                token_type_ids=None, attention_mask=None, labels=None):
-        sequence_output, _ = self.bert(
-            input_ids, token_type_ids, attention_mask,
-            output_all_encoded_layers=False)
-        sequence_output = self.dropout(sequence_output)
-        logits = self.classifier(sequence_output)
-
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-1)
-            # Only keep active parts of the loss
-            if attention_mask is not None:
-                active_loss = attention_mask.view(-1) == 1
-                active_logits = logits.view(-1, self.num_labels)[active_loss]
-                active_labels = labels.view(-1)[active_loss]
-                loss = loss_fct(active_logits, active_labels)
-            else:
-                loss = loss_fct(
-                    logits.view(-1, self.num_labels), labels.view(-1))
-            return loss
-        else:
-            return logits
 
 
 class InputFeatures(object):
@@ -201,6 +169,39 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
             tokens_b.pop()
 
 
+class BertForNER(BertForTokenClassification):
+    """BERT model for neural entity recognition.
+    Essentially identical to BertForTokenClassification, but ignores
+    labels with an index of -1 in the loss function.
+    """
+
+    def __init__(self, config, num_labels):
+        super(BertForNER, self).__init__(config, num_labels)
+
+    def forward(self, input_ids,
+                token_type_ids=None, attention_mask=None, labels=None):
+        sequence_output, _ = self.bert(
+            input_ids, token_type_ids, attention_mask,
+            output_all_encoded_layers=False)
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss(ignore_index=-1)
+            # Only keep active parts of the loss
+            if attention_mask is not None:
+                active_loss = attention_mask.view(-1) == 1
+                active_logits = logits.view(-1, self.num_labels)[active_loss]
+                active_labels = labels.view(-1)[active_loss]
+                loss = loss_fct(active_logits, active_labels)
+            else:
+                loss = loss_fct(
+                    logits.view(-1, self.num_labels), labels.view(-1))
+            return loss
+        else:
+            return logits
+
+
 class BertForDEID(BertForNER):
     """BERT model for deidentification."""
 
@@ -214,8 +215,6 @@ class BertForDEID(BertForNER):
         ]
         self.num_labels = len(self.labels)
         self.label_id_map = {i: label for i, label in enumerate(self.labels)}
-        self.bert_model = 'bert-base-uncased'
-        self.do_lower_case = True
 
         # by default, we do non-overlapping segments of text
         self.max_seq_length = max_seq_length
@@ -232,6 +231,20 @@ class BertForDEID(BertForNER):
         else:
             raise ValueError('Folder %s did not have model and config file.',
                              model_dir)
+
+        if config.num_hidden_layers == 12:
+            self.bert_model = 'bert-base'
+        else:
+            # num_hidden_layers == 24
+            self.bert_model = 'bert-large'
+
+        if config.vocab_size == 28996:
+            self.bert_model += '-cased'
+            self.do_lower_case = False
+        else:
+            # vocab_size == 30522
+            self.bert_model += '-uncased'
+            self.do_lower_case = True
 
         # initialize tokenizer
         self.tokenizer = BertTokenizerNER.from_pretrained(

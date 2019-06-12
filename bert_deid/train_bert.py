@@ -31,13 +31,12 @@ import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
-from torch.nn import CrossEntropyLoss
 
 from seqeval.metrics import classification_report
 from tqdm import tqdm, trange
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from pytorch_pretrained_bert.modeling import BertForTokenClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
