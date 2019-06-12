@@ -157,3 +157,9 @@ for f in files:
     shutil.copyfile(f'{model_pred_xml_path}/{f}.xml', f'{output_path}/pred/{f}.xml')
 
 ```
+
+# Apply multi-label
+
+```
+python bert_deid/apply_model.py --model_dir models/bert-multi-label-best-base --input ../deid-gs/rr-set-1/txt --labels ../deid-gs/rr-set-1/ann --bert_model bert-base-uncased --do_lower_case --task_name radreportlabel -m overlap --step-size 100 --sequence-length 100 --output-pred preds.rrlabel.rr-set-1
+```
