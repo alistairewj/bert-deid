@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """BERT finetuning runner."""
-# CUDA_VISIBLE_DEVICES=0 python bert_ner.py --data_path data/i2b2_2014 --bert_model bert-base-cased --task_name i2b2 --output_dir models/i2b2_2014_overlap_cased --max_seq_length=128 --do_train --train_batch_size 32 --num_train_epochs 3 --warmup_proportion=0.4 --seed 7841
+# CUDA_VISIBLE_DEVICES=0 python train_bert.py --data_path data/i2b2_2014 --bert_model bert-base-cased --task_name i2b2 --output_dir models/i2b2_2014_overlap_cased --max_seq_length=128 --do_train --train_batch_size 32 --num_train_epochs 3 --warmup_proportion=0.4 --seed 7841
 
 from __future__ import absolute_import, division, print_function
 
@@ -42,6 +42,7 @@ from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
+from bert_deid.model import convert_examples_to_features, BertForNER
 from bert_deid.tokenization import BertTokenizerNER
 from bert_deid.processors import i2b2DeidProcessor, hipaaDeidProcessor, CoNLLProcessor
 
@@ -54,188 +55,6 @@ logger = logging.getLogger(__name__)
 def segment_ids(self, segment1_len, segment2_len):
     ids = [0] * segment1_len + [1] * segment2_len
     return torch.tensor([ids]).to(device=self.device)
-
-
-class BertForNER(BertForTokenClassification):
-    """BERT model for neural entity recognition.
-    Essentially identical to BertForTokenClassification, but ignores
-    labels with an index of -1 in the loss function.
-    """
-
-    def __init__(self, config, num_labels):
-        super(BertForNER, self).__init__(config, num_labels)
-
-    def forward(self, input_ids,
-                token_type_ids=None, attention_mask=None, labels=None):
-        sequence_output, _ = self.bert(
-            input_ids, token_type_ids, attention_mask,
-            output_all_encoded_layers=False)
-        sequence_output = self.dropout(sequence_output)
-        logits = self.classifier(sequence_output)
-
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-1)
-            # Only keep active parts of the loss
-            if attention_mask is not None:
-                active_loss = attention_mask.view(-1) == 1
-                active_logits = logits.view(-1, self.num_labels)[active_loss]
-                active_labels = labels.view(-1)[active_loss]
-                loss = loss_fct(active_logits, active_labels)
-            else:
-                loss = loss_fct(
-                    logits.view(-1, self.num_labels), labels.view(-1))
-            return loss
-        else:
-            return logits
-
-
-class InputFeatures(object):
-    """A single set of features of data."""
-
-    def __init__(self, input_ids, input_mask, segment_ids, label_ids):
-        self.input_ids = input_ids
-        self.input_mask = input_mask
-        self.segment_ids = segment_ids
-        self.label_ids = label_ids
-
-
-def prepare_tokens(tokens, tokens_sw, tokens_idx, label,
-                   label_list, max_seq_length, tokenizer):
-
-    label_map = {label: i for i, label in enumerate(label_list)}
-
-    segment_ids = [0] * len(tokens)
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-    # example.label is a list of start/stop offsets for tagged entities
-    # use this to create list of labels for each token
-    # assumes labels are ordered
-    labels = ['O'] * len(input_ids)
-    if len(label) > 0:
-        l_idx = 0
-        start, stop, entity = label[l_idx]
-        for i, idx in enumerate(tokens_idx):
-            if idx[0] >= stop:
-                l_idx += 1
-                # exit loop if we have finished assigning labels
-                if l_idx >= len(label):
-                    break
-                start, stop, entity = label[l_idx]
-
-            if (idx[0] >= start) & (idx[0] < stop):
-                # tokens are assigned based on label of first character
-                labels[i] = entity
-
-    # convert from text labels to integer coding
-    # if a label is not in the map, we ignore that token in backprop
-    labels[0] = "[CLS]"
-    labels[-1] = "[SEP]"
-    label_ids = [label_map[x]
-                 if x in label_map
-                 else -1
-                 for x in labels]
-
-    # set labels for subwords to -1 to ignore them in label loss
-    label_ids = [-1 if tokens_sw[i] == 1
-                 else label_id
-                 for i, label_id in enumerate(label_ids)]
-
-    # The mask has 1 for real tokens and 0 for padding tokens.
-    input_mask = [1] * len(input_ids)
-
-    # Zero-pad up to the sequence length.
-    padding = [0] * (max_seq_length - len(input_ids))
-    input_ids += padding
-    input_mask += padding
-    segment_ids += padding
-    label_ids += padding
-
-    assert len(input_ids) == max_seq_length
-    assert len(input_mask) == max_seq_length
-    assert len(segment_ids) == max_seq_length
-    assert len(label_ids) == max_seq_length
-
-    return input_ids, input_mask, segment_ids, label_ids
-
-
-def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
-    """Loads a data file into a list of `InputBatch`s."""
-
-    features = []
-    for (ex_index, example) in enumerate(examples):
-        # track offsets in tokenization
-        tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize_with_index(
-            example.text_a)
-
-        # Account for [CLS] and [SEP] with "- 2"
-        if len(tokens_a) > max_seq_length - 2:
-            tokens_a = tokens_a[:(max_seq_length - 2)]
-            tokens_a_sw = tokens_a_sw[:(max_seq_length - 2)]
-            tokens_a_idx = tokens_a_idx[:(max_seq_length - 2)]
-
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids: 0   0   0   0  0     0 0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambigiously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
-        tokens_sw = [0] + tokens_a_sw + [0]
-        tokens_idx = [[-1]] + tokens_a_idx + [[-1]]
-
-        input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
-            tokens, tokens_sw, tokens_idx, example.label,
-            label_list, max_seq_length, tokenizer)
-
-        if ex_index < 5:
-            logger.info("*** Example ***")
-            logger.info("guid: %s" % (example.guid))
-            logger.info("tokens: %s" % " ".join(
-                [str(x) for x in tokens]))
-            logger.info("input_ids: %s" %
-                        " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s" %
-                        " ".join([str(x) for x in input_mask]))
-            logger.info(
-                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-            logger.info("label_ids: %s" %
-                        " ".join([str(x) for x in label_ids]))
-
-        features.append(
-            InputFeatures(input_ids=input_ids,
-                          input_mask=input_mask,
-                          segment_ids=segment_ids,
-                          label_ids=label_ids))
-    return features
-
-
-def _truncate_seq_pair(tokens_a, tokens_b, max_length):
-    """Truncates a sequence pair in place to the maximum length."""
-
-    # This is a simple heuristic which will always truncate the longer sequence
-    # one token at a time. This makes more sense than truncating an equal percent
-    # of tokens from each, since if one sequence is very short then each token
-    # that's truncated likely contains more information than a longer sequence.
-    while True:
-        total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            tokens_b.pop()
 
 
 def accuracy(out, labels):
