@@ -91,8 +91,8 @@ def parse_arguments(args):
     parser.add_argument('-i', '--input', type=str,
                         default=None, required=True,
                         help='Folder with ann and txt subfolders')
-    parser.add_argument('-harmonize', '--harmonize', type=str,
-                        default=True, required=False,
+    parser.add_argument('-h', '--harmonize', action='store_true',
+                        required=False,
                         help='Harmonize annotation labels to i2b2 2014 categories')
 
     arguments = parser.parse_args(args)
@@ -152,7 +152,16 @@ def create_report(annotations, notes, harmonize=True):
     n_char = sum([len(x) for x in notes])
     n_ann = annotations.shape[0]
 
+    # average length of each note in characters
+    avg_char = float(n_char) / float(n_notes)
+
     tokenizer = re.compile(r'\s')
+
+    # average tokens per note
+    tokens = [len(tokenizer.split(x)) for x in notes]
+    n_tokens = sum(tokens)
+    avg_tokens = float(n_tokens) / float(n_notes)
+
     tokens = [len(tokenizer.split(x)) for x in annotations['entity']]
 
     n_phi_tokens = sum(tokens)
@@ -162,6 +171,9 @@ def create_report(annotations, notes, harmonize=True):
     print('\n{}\n{}\n{}'.format('-'*14, header, '-'*14))
     print(f'Records: {n_notes}.')
     print(f'Characters: {n_char}.')
+    print(f'Chars/note: {avg_char:4.1f}.')
+    print(f'Tokens: {n_tokens}.')
+    print(f'Tokens/note: {avg_tokens:4.1f}.')
     print(f'PHI annotations: {n_ann}.')
     print(f'PHI tokens: {n_phi_tokens}.')
     print(
@@ -296,9 +308,7 @@ def main(args):
     # iterate files in the input folder.
     # add annotations to a dataframe and add notes to a list
     annotations, notes = collect_records(input_path=arguments.input)
-    harmonize = True if arguments.harmonize.lower() in [
-        "true", "yes"] else False
-    create_report(annotations, notes, harmonize)
+    create_report(annotations, notes, arguments.harmonize)
 
 
 if __name__ == '__main__':
