@@ -406,10 +406,13 @@ class BertForDEID(BertForNER):
         # pool token-wise annotations together
         # this is necessary if overlapping examples are used
         # i.e. self.token_step_size < self.sequence_length
+        if df.shape[0] == 0:
+            return df
 
         # get location of maximally confident annotations
         df_keep = df.groupby(['annotator', 'start', 'stop'])[
             ['confidence']].max()
+
         df_keep.reset_index(inplace=True)
 
         # merge on these columns to remove rows with low confidence
