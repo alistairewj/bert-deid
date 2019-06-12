@@ -169,6 +169,9 @@ def simplify_bert_ann(anns, text, lowercase=True, dist=1):
     anns (dataframe): annotation dataframe
     text (str): text annotated by the dataframe
     """
+    if anns.shape[0] == 0:
+        return anns
+
     # lower case entity types and collapse similar entities
     anns = combine_entity_types(anns, lowercase=lowercase)
 
