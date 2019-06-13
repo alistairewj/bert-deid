@@ -157,7 +157,7 @@ def main():
 
         # create a list with the header for output
         context = 50
-        csv_header = ['annotation_id',
+        csv_header = ['document_id', 'annotation_id',
                       'context_0', 'entity_0',
                       'context_1', 'entity_1',
                       'context_2']
@@ -300,13 +300,14 @@ def main():
                     csvwriter = csv.writer(fp, delimiter=',')
                     csvwriter.writerow(csv_header)
                     for annotation in annotations:
-                        csvwriter.writerow(annotation)
+                        # write document ID + annotation row
+                        csvwriter.writerow([fn] + annotation)
 
                 # now write out to the file with all context
                 with open(os.path.join(csv_path, 'all.csv'), 'a') as fp:
                     csvwriter = csv.writer(fp, delimiter=',')
                     for annotation in annotations:
-                        csvwriter.writerow(annotation)
+                        csvwriter.writerow([fn] + annotation)
 
 
 if __name__ == "__main__":
