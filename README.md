@@ -13,14 +13,25 @@ python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
 
 ## Use wrappers to generate data and train model
 
-
 prepare the train.csv/test.csv files:
 
 `python scripts/create_csv_config.py -c configs/train/i2b2-2014-overlap.json`
 
-train the mode:
+train the model:
 
 `python scripts/train_bert_config.py -c configs/train/i2b2-2014-overlap.json`
+
+create a list of all tokens in the training set:
+
+`python scripts/create_train_tokens_file.py -c configs/train/i2b2-2014-rr-set-1-overlap.json`
+
+make predictions on a test set and evaluate the model:
+
+`python scripts/run_and_eval_bert.py -c configs/test/i2b2-2014-rr-set-1-on-i2b2-2014-test.json`
+
+calculate operating point statistics on that test set:
+
+`python python scripts/eval_pred.py  -c configs/test/i2b2-2014-rr-set-1-on-i2b2-2014-test.json`
 
 ## Quickstart
 
