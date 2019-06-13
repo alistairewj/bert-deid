@@ -6,6 +6,7 @@ import logging
 import csv
 import argparse
 import warnings
+import re
 
 from sympy import Interval, Union
 from bert_deid.describe_data import harmonize_label
@@ -489,6 +490,107 @@ def output_to_brat(doc_id, df, path, text=None):
                 t, 'missed', start, stop, txt)
             fp.write(annotation)
             t += 1
+
+
+def pattern_spans(text, pattern):
+    """
+    Iterator that splits text using a regex.
+    Also returns the span of words (start and stop indices).
+    """
+
+    tokens = pattern.split(text)
+
+    offset = 0
+    for token in tokens:
+        offset = text.find(token, offset)
+        yield token, offset, offset+len(token)
+        offset += len(token)
+
+
+def split_by_pattern(text, pattern):
+    """
+    Iterator that wraps the pattern span splitter.
+    """
+    tokens_with_spans = list()
+    n = 0
+    for token, start, end in pattern_spans(text, pattern):
+        tokens_with_spans.append([n, start, end, token])
+        n += 1
+
+    return tokens_with_spans
+
+
+def get_entity_context(df, path, text,
+                       context=3):
+    """
+    Given an annotation dataframe, get nearby tokens
+
+    context: how many words on each side to include (default 3).
+    """
+    if df.shape[0] == 0:
+        return
+    pattern = re.compile(r'\s')
+
+    # create list of list, each sublist is:
+    #   counter, start index, stop index, token
+    text_split = split_by_pattern(text, pattern)
+
+    # ensure df is in ascending order of indices
+    df = df.sort_values(['start', 'stop'])
+    annotations = list()
+    for idx, row in df.iterrows():
+        a = row['annotation_id']
+
+        # we prefer to rederive entity from the text
+        spans = row['span'].split(';')
+        earliest_span_start = int(spans[0].split(' ')[0])
+        last_span_stop = int(spans[-1].split(' ')[1])
+
+        # find the first span which is after this entity
+        # x[0] is the index of the row
+        span_left_idx = next(
+            (x[0] for x in text_split
+                if x[2] >= earliest_span_start), None)
+
+        if span_left_idx is None:
+            # there is no entity after this span
+            # span must be the last word
+            # left/right span idx are set to the last token
+            span_left_idx = text_split[-1][0]
+            span_right_idx = text_split[-1][0]
+        else:
+            span_right_idx = next(
+                (x[0] for x in text_split
+                    if x[2] > last_span_stop), None)
+            # span ends at the last token
+            if span_right_idx is None:
+                span_right_idx = text_split[-1][0]
+
+        context_right = ['']*context
+        # iterate through tokens on the right side of the span
+        i = 0
+        for s in range(span_right_idx, span_right_idx+context):
+            # ensure we do not go beyond the text
+            if s < text_split[-1][0]:
+                # add word to context vector
+                context_right[i] = text_split[s][3]
+            i += 1
+
+        context_left = ['']*context
+        # iterate through tokens on the left side of the span
+        i = -1
+        for s in range(span_left_idx - 1, span_left_idx - context - 1, -1):
+            # ensure we do not go beyond the text
+            if s > 0:
+                # add word to context vector
+                context_left[i] = text_split[s][3]
+            i -= 1
+
+        annotation = [a, ';' in row['span']] + \
+            context_left + [row['entity']] + context_right
+        annotations.append(annotation)
+
+    return annotations
 
 
 def add_brat_conf_files(out_path):

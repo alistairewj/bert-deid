@@ -84,6 +84,10 @@ def main():
                         default=None,
                         help='folder to output brat annotations')
 
+    parser.add_argument('--csv_path', type=str,
+                        default=None,
+                        help='folder to output errors for labeling')
+
     # parameters of the model/deid
     parser.add_argument("--task_name",
                         default='i2b2',
@@ -144,6 +148,26 @@ def main():
 
         # add configuration files if needed to brat folder
         utils.add_brat_conf_files(argparse_dict['brat_path'])
+
+    csv_path = None
+    if argparse_dict['csv_path'] is not None:
+        csv_path = argparse_dict['csv_path']
+        if not os.path.exists(csv_path):
+            os.makedirs(csv_path)
+
+        # create a list with the header for output
+        context = 3
+        csv_header = ['annotation_id', 'multisegment']
+        context_left = [
+            f'left_context_{i}' for i in range(context-1, -1, -1)]
+        context_right = [
+            f'right_context_{i}' for i in range(0, context, 1)]
+        csv_header += context_left + ['entity'] + context_right
+
+        # initialize a CSV file to hold all annot
+        with open(os.path.join(csv_path, 'all.csv'), 'w') as fp:
+            csvwriter = csv.writer(fp, delimiter=',')
+            csvwriter.writerow(csv_header)
 
     # ensure extension vars have the dot prefix
     for c in argparse_dict.keys():
@@ -245,24 +269,41 @@ def main():
         # run comparison looking for exact/partial/misses
         cmp_ann = utils.compare_single_doc(gs, df)
 
-        if argparse_dict['brat_path'] is not None:
-            # only output annotations if document has non-exact match
-            idx = (cmp_ann['exact'] == 0)
-            if not idx.any():
-                continue
-
+        # only output annotations if document has non-exact match
+        idx = (cmp_ann['exact'] == 0)
+        if idx.any():
             # add in the text/start/stop from gold standard annot
             cmp_ann = cmp_ann.merge(gs[['annotation_id',
                                         'start', 'stop',
                                         'entity_type', 'entity']],
                                     how='left', on='annotation_id')
 
-            # output ann file to brat
-            utils.output_to_brat(fn, cmp_ann, argparse_dict['brat_path'])
+            # output txt/ann to brat format for review with brat
+            if argparse_dict['brat_path'] is not None:
+                # output ann file to brat
+                utils.output_to_brat(fn, cmp_ann, argparse_dict['brat_path'])
 
-            # output text file to brat
-            with open(os.path.join(argparse_dict['brat_path'], f'{fn}.txt'), 'w') as fp:
-                fp.write(text)
+                # output text file to brat
+                with open(os.path.join(argparse_dict['brat_path'], f'{fn}.txt'), 'w') as fp:
+                    fp.write(text)
+
+            # output CSV of nearby tokens for manual review
+            if csv_path is not None:
+                # output to CSV which contains errors for labeling
+                annotations = utils.get_entity_context(
+                    cmp_ann.loc[idx, :], csv_path, text, context=context
+                )
+                with open(os.path.join(csv_path, f'{fn}.csv'), 'w') as fp:
+                    csvwriter = csv.writer(fp, delimiter=',')
+                    csvwriter.writerow(csv_header)
+                    for annotation in annotations:
+                        csvwriter.writerow(annotation)
+
+                # now write out to the file with all context
+                with open(os.path.join(csv_path, 'all.csv'), 'a') as fp:
+                    csvwriter = csv.writer(fp, delimiter=',')
+                    for annotation in annotations:
+                        csvwriter.writerow(annotation)
 
 
 if __name__ == "__main__":
