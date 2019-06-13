@@ -74,16 +74,20 @@ def main(args):
 
     all_tokens = {}
     pattern = re.compile(r'\s')
+    stopchar_rem = re.compile(r'[,.;_\\\/?!@#$%^&*()-]')
     for doc_id in records:
         with open(os.path.join(txt_path, f'{doc_id}{txt_ext}'), 'r') as fp:
             text = ''.join(fp.readlines())
 
         tokens = pattern.split(text)
         for t in tokens:
-            try:
-                all_tokens[t] += 1
-            except KeyError:
-                all_tokens[t] = 1
+            # remove boring characters
+            t = stopchar_rem.sub('', t)
+            if len(t) > 0:
+                try:
+                    all_tokens[t] += 1
+                except KeyError:
+                    all_tokens[t] = 1
 
     # write out to file using pandas for convenience
     df = pd.DataFrame.from_dict(all_tokens, orient='index')

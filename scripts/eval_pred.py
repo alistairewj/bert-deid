@@ -140,6 +140,8 @@ def main():
     tr = pd.read_csv(tr, index_col=0)
     # create a set for all train vocab allowing for quick comparisons
     tr_tokens = set(tr.index)
+    # we will exclude certain characters from this unique check
+    stopchar_rem = re.compile(r'[,.;_\\\/?!@#$%^&*()-]')
 
     csv_path = None
     if argparse_dict['csv_path'] is not None:
@@ -224,7 +226,12 @@ def main():
         for token, start, end in utils.pattern_spans(text, pattern):
             token_tar = False
             token_pred = False
-            token_in_tr = token in tr_tokens
+            token_in_tr = stopchar_rem.sub('', token)
+            # if it's only stop chars, it's not a unique token
+            if len(token_in_tr) == 0:
+                token_in_tr = True
+            else:
+                token_in_tr = token_in_tr in tr_tokens
 
             # if any of the individual characters are flagged
             # .. then we consider the whole token to be flagged
