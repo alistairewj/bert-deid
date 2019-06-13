@@ -621,8 +621,12 @@ def get_entity_context(df, text, context=30, color=False):
     for _, row in df.iterrows():
         # we prefer to rederive entity from the text
         spans = row['span'].split(';')
-        earliest_span_start = int(spans[0].split(' ')[0])
-        last_span_stop = int(spans[-1].split(' ')[1])
+        for i in range(spans):
+            spans[i] = spans[i].split(' ')
+            spans[i][0], spans[i][1] = int(spans[i][0]), int(spans[i][1])
+
+        earliest_span_start = spans[0][0]
+        last_span_stop = spans[-1][1]
 
         span_start = max(earliest_span_start - context, 0)
         span_stop = min(last_span_stop + context, len(text))
@@ -635,8 +639,7 @@ def get_entity_context(df, text, context=30, color=False):
         i = 0
         while i < (len(spans)-1):
             # handle segments of entities
-            s = spans[i].split(' ')
-            s[0], s[1] = int(s[0]), int(s[1])
+            s = spans[i]
             text_add = text[s[0]:s[1]]
             # bcolors.BOLD
             if color:
@@ -649,8 +652,7 @@ def get_entity_context(df, text, context=30, color=False):
             i += 1
 
         # final entity span
-        s = spans[-1].split(' ')
-        s[0], s[1] = int(s[0]), int(s[1])
+        s = spans[-1]
         text_add = text[s[0]:s[1]]
         # bcolors.BOLD
         if color:
