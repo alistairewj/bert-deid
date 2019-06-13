@@ -621,7 +621,7 @@ def get_entity_context(df, text, context=30, color=False):
     for _, row in df.iterrows():
         # we prefer to rederive entity from the text
         spans = row['span'].split(';')
-        for i in range(spans):
+        for i in range(len(spans)):
             spans[i] = spans[i].split(' ')
             spans[i][0], spans[i][1] = int(spans[i][0]), int(spans[i][1])
 
