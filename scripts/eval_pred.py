@@ -129,6 +129,18 @@ def main():
     if argparse_dict['pred_path'] is None:
         raise ValueError('Prediction path required to evaluate predictions.')
 
+    model_path = argparse_dict['model_path']
+    tr = os.path.join(model_path, 'training_set_tokens.csv')
+    if not os.path.exists(tr):
+        raise ValueError(
+            ('training_set_tokens.csv file required in %s\n'
+             'create with create_train_tokens_file.py'), model_path)
+
+    # load vocab
+    tr = pd.read_csv(tr, index_col=0)
+    # create a set for all train vocab allowing for quick comparisons
+    tr_tokens = set(tr.index)
+
     csv_path = None
     if argparse_dict['csv_path'] is not None:
         csv_path = argparse_dict['csv_path']
@@ -164,6 +176,7 @@ def main():
     logger.info("  Num examples = %d", len(input_files))
 
     perf_all = {}
+    # keep track of all PHI tokens in this dataset
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
         with open(os.path.join(input_path, f'{fn}{input_ext}'), 'r') as fp:
@@ -202,11 +215,16 @@ def main():
 
         # report performance token wise
         tokens, tokens_y, tokens_ypred = [], [], []
+        # keep track of whether a token was in the training set vocab
+        tokens_in_tr = list()
+
         pattern = re.compile(r'\s')
         n_tokens = 0
+        n_tokens_in_tr = 0
         for token, start, end in utils.pattern_spans(text, pattern):
             token_tar = False
             token_pred = False
+            token_in_tr = token in tr_tokens
 
             # if any of the individual characters are flagged
             # .. then we consider the whole token to be flagged
@@ -220,18 +238,32 @@ def main():
                 tokens.append([token, start, end])
                 tokens_y.append(token_tar)
                 tokens_ypred.append(token_pred)
+                tokens_in_tr.append(token_in_tr)
 
             n_tokens += 1
+            n_tokens_in_tr += token_in_tr
 
         # now we have a list of tokens with preds, calculate some stats
         tokens_y = np.asarray(tokens_y, dtype=bool)
         tokens_ypred = np.asarray(tokens_ypred, dtype=bool)
+        # invert tokens_in_tr to get index of tokens unique to test
+        tokens_uniq = ~np.asarray(tokens_in_tr, dtype=bool)
 
         curr_performance['n_token'] = n_tokens
         curr_performance['n_token_phi'] = sum(tokens_y)
         curr_performance['n_token_tp'] = sum(tokens_y & tokens_ypred)
         curr_performance['n_token_fp'] = sum(~tokens_y & tokens_ypred)
         curr_performance['n_token_fn'] = sum(tokens_y & ~tokens_ypred)
+
+        # same performance, factoring in uniqueness of token
+        curr_performance['n_token_uniq'] = n_tokens - n_tokens_in_tr
+        curr_performance['n_token_uniq_phi'] = sum(tokens_uniq & tokens_y)
+        curr_performance['n_token_uniq_tp'] = sum(
+            tokens_uniq & tokens_y & tokens_ypred)
+        curr_performance['n_token_uniq_fp'] = sum(
+            tokens_uniq & ~tokens_y & tokens_ypred)
+        curr_performance['n_token_uniq_fn'] = sum(
+            tokens_uniq & tokens_y & ~tokens_ypred)
 
         perf_all[fn] = curr_performance
 
