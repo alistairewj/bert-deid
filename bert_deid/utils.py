@@ -520,8 +520,8 @@ def split_by_pattern(text, pattern):
     return tokens_with_spans
 
 
-def get_entity_context(df, path, text,
-                       context=3):
+def get_entity_token_context(df, text,
+                             context=3):
     """
     Given an annotation dataframe, get nearby tokens
 
@@ -588,6 +588,76 @@ def get_entity_context(df, path, text,
 
         annotation = [a, ';' in row['span']] + \
             context_left + [row['entity']] + context_right
+        annotations.append(annotation)
+
+    return annotations
+
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def get_entity_context(df, text, context=30, color=False):
+    """
+    Given an annotation dataframe, get nearby characters
+
+    context: how many words on each side to include (default 3).
+    """
+    if df.shape[0] == 0:
+        return
+
+    text = text.replace('\n', ' ')
+
+    # ensure df is in ascending order of indices
+    df = df.sort_values(['start', 'stop'])
+    annotations = list()
+    for _, row in df.iterrows():
+        # we prefer to rederive entity from the text
+        spans = row['span'].split(';')
+        earliest_span_start = int(spans[0].split(' ')[0])
+        last_span_stop = int(spans[-1].split(' ')[1])
+
+        span_start = max(earliest_span_start - context, 0)
+        span_stop = min(last_span_stop + context, len(text))
+
+        # initialize annotation list with annotation_id
+        annotation = [row['annotation_id']]
+
+        # start with context before the first span
+        annotation.append(text[span_start:earliest_span_start])
+        i = 0
+        while i < (len(spans)-1):
+            # handle segments of entities
+            s = spans[i].split(' ')
+            s[0], s[1] = int(s[0]), int(s[1])
+            text_add = text[s[0]:s[1]]
+            # bcolors.BOLD
+            if color:
+                text_add = bcolors.FAIL + text_add + bcolors.ENDC
+            annotation.append(text_add)
+
+            # also add in text between two entities
+            next_span_start = spans[i+1][0]
+            annotation.append(text[s[1]:next_span_start])
+            i += 1
+
+        # final entity span
+        s = spans[-1].split(' ')
+        s[0], s[1] = int(s[0]), int(s[1])
+        text_add = text[s[0]:s[1]]
+        # bcolors.BOLD
+        if color:
+            text_add = bcolors.FAIL + text_add + bcolors.ENDC
+        annotation.append(text_add)
+        annotation.append(text[s[1]:span_stop])
+
         annotations.append(annotation)
 
     return annotations

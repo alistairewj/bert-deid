@@ -156,13 +156,11 @@ def main():
             os.makedirs(csv_path)
 
         # create a list with the header for output
-        context = 3
-        csv_header = ['annotation_id', 'multisegment']
-        context_left = [
-            f'left_context_{i}' for i in range(context-1, -1, -1)]
-        context_right = [
-            f'right_context_{i}' for i in range(0, context, 1)]
-        csv_header += context_left + ['entity'] + context_right
+        context = 50
+        csv_header = ['annotation_id',
+                      'context_0', 'entity_0',
+                      'context_1', 'entity_1',
+                      'context_2']
 
         # initialize a CSV file to hold all annot
         with open(os.path.join(csv_path, 'all.csv'), 'w') as fp:
@@ -291,8 +289,13 @@ def main():
             if csv_path is not None:
                 # output to CSV which contains errors for labeling
                 annotations = utils.get_entity_context(
-                    cmp_ann.loc[idx, :], csv_path, text, context=context
-                )
+                    cmp_ann.loc[idx, :], text, context=context, color=False)
+
+                # rearrange
+
+                # annotations = utils.get_entity_context(
+                #    cmp_ann.loc[idx, :], text, context=context
+                # )
                 with open(os.path.join(csv_path, f'{fn}.csv'), 'w') as fp:
                     csvwriter = csv.writer(fp, delimiter=',')
                     csvwriter.writerow(csv_header)
