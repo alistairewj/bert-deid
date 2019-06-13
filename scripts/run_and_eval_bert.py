@@ -224,6 +224,8 @@ def main():
             # create the output path
             os.makedirs(argparse_dict['pred_orig_path'])
 
+    input_files.sort()
+
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
         with open(os.path.join(input_path, f'{fn}{input_ext}'), 'r') as fp:
