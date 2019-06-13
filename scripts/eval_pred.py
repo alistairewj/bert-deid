@@ -241,7 +241,7 @@ def main():
     print(df)
 
     if csv_path is not None:
-        df.to_csv(os.path.join(csv_path, 'performance.csv'), index=False)
+        df.to_csv(os.path.join(csv_path, 'performance.csv'))
 
 
 if __name__ == "__main__":
