@@ -178,6 +178,8 @@ def main():
     logger.info("  Num examples = %d", len(input_files))
 
     perf_all = {}
+    fn_all = []
+    fp_all = []
     # keep track of all PHI tokens in this dataset
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
@@ -273,11 +275,20 @@ def main():
             tokens_uniq & tokens_y & ~tokens_ypred)
 
         perf_all[fn] = curr_performance
+        fn_all.extend([x[0]
+                       for i, x in enumerate(tokens)
+                       if tokens_y[i] & ~tokens_ypred[i]])
+        fp_all.extend([x[0]
+                       for i, x in enumerate(tokens)
+                       if ~tokens_y[i] & tokens_ypred[i]])
 
     # convert to dataframe
     df = pd.DataFrame.from_dict(perf_all, orient='index')
 
     print(df)
+    print('\nFalse negatives\n"{}"'.format('","'.join(fn_all)))
+    print('\nFalse positives:\n"{}"'.format('","'.join(fp_all)))
+    print('\n')
 
     if csv_path is not None:
         df.to_csv(os.path.join(csv_path, 'performance.csv'))
