@@ -67,6 +67,41 @@ python scripts/run_and_eval_bert.py -c configs/train/physionet.json
 python scripts/eval_pred.py  -c configs/train/physionet.json
 ```
 
+### multiple runs on quadro
+
+```sh
+for d in `ls configs/quadro/token`; do python scripts/create_csv_config.py -c configs/quadro/token/$d; done;
+for d in `ls configs/quadro/token`; do CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/quadro/token/$d; done;
+for d in `ls configs/quadro/token`; do python scripts/create_train_tokens_file.py -c configs/quadro/token/$d; done;
+for d in `ls configs/quadro/token`; do python scripts/run_and_eval_bert.py -c configs/quadro/token/$d; done;
+for d in `ls configs/quadro/token`; do python scripts/eval_pred.py -c configs/quadro/token/$d; done;
+
+for d in `ls configs/quadro/binary`; do python scripts/create_csv_config.py -c configs/quadro/binary/$d; done;
+for d in `ls configs/quadro/binary`; do CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/quadro/binary/$d; done;
+for d in `ls configs/quadro/binary`; do python scripts/create_train_tokens_file.py -c configs/quadro/binary/$d; done;
+for d in `ls configs/quadro/binary`; do python scripts/run_and_eval_bert.py -c configs/quadro/binary/$d; done;
+for d in `ls configs/quadro/binary`; do python scripts/eval_pred.py -c configs/quadro/binary/$d; done;
+```
+
+### multiple runs on titanx
+
+```sh
+for d in `ls configs/titanx/token`; do python scripts/create_csv_config.py -c configs/titanx/token/$d; done;
+for d in `ls configs/titanx/token`; do CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/titanx/token/$d; done;
+for d in `ls configs/titanx/token`; do python scripts/create_train_tokens_file.py -c configs/titanx/token/$d; done;
+for d in `ls configs/titanx/token`; do python scripts/run_and_eval_bert.py -c configs/titanx/token/$d; done;
+for d in `ls configs/titanx/token`; do python scripts/eval_pred.py -c configs/titanx/token/$d; done;
+```
+
+```sh
+for d in `ls configs/titanx/binary`; do python scripts/create_csv_config.py -c configs/titanx/binary/$d; done;
+for d in `ls configs/titanx/binary`; do CUDA_VISIBLE_DEVICES=1 python scripts/train_bert_config.py -c configs/titanx/binary/$d; done;
+for d in `ls configs/titanx/binary`; do python scripts/create_train_tokens_file.py -c configs/titanx/binary/$d; done;
+for d in `ls configs/titanx/binary`; do python scripts/run_and_eval_bert.py -c configs/titanx/binary/$d; done;
+for d in `ls configs/titanx/binary`; do python scripts/eval_pred.py -c configs/titanx/binary/$d; done;
+```
+
+
 ## Quickstart
 
 CoNLL:
