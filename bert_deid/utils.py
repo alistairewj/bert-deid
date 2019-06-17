@@ -51,7 +51,7 @@ def create_hamonize_label_dict(grouping='i2b2'):
     elif grouping == 'binary':
         labels = [
             ['PHI', ['NAME', 'PATIENT', 'USERNAME',
-                     'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL'
+                     'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL',
                      'DOCTOR', 'HCPNAME',
                      'LOCATION', 'ORGANIZATION', 'HOSPITAL',
                      'PROTECTED_ENTITY', 'PROTECTED ENTITY',
