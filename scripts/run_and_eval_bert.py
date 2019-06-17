@@ -122,6 +122,11 @@ def main():
         with open(args.config, 'r') as fp:
             config = json.load(fp)
 
+        for k in config:
+            if config[k] == 'True':
+                config[k] = True
+            elif config[k] == 'False':
+                config[k] = False
         argparse_dict.update(config)
 
     # if pred_orig_path exists, we are outputting non-simplified annot
