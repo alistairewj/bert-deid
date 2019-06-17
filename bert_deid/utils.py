@@ -15,7 +15,7 @@ def create_hamonize_label_dict(grouping='i2b2'):
             ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
                       'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
             ['PROFESSION', ['PROFESSION']],
-            ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION',
+            ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION', 'URL',
                           'STREET', 'STATE',
                           'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
                           'PROTECTED_ENTITY', 'PROTECTED ENTITY',
@@ -24,32 +24,34 @@ def create_hamonize_label_dict(grouping='i2b2'):
             ['DATE', ['DATE', 'DATEYEAR']],
             ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
                     'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'URL',
-                         'IPADDR', 'IPADDRESS', 'CONTACT']]
+            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                         'IPADDR', 'IPADDRESS']]
         ]
     elif grouping == 'hipaa':
         labels = [
             ['NAME', ['NAME', 'PATIENT', 'USERNAME',
-                      'DOCTOR', 'HCPNAME']],
+                      'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
             ['LOCATION', ['LOCATION', 'ORGANIZATION', 'HOSPITAL',
-                          'STREET', 'CITY', 'STATE', 'COUNTRY', 'ZIP',
-                          'NATIONALITY', 'URL',
+                          'STREET', 'CITY', 'ZIP',
+                          'URL',
                           'PROTECTED_ENTITY', 'PROTECTED ENTITY',
                           'LOCATION-OTHER']],
             ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
             ['DATE', ['DATE', 'DATEYEAR']],
             ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
                     'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT']],
-            ['O', [
-                'PROFESSION',
-                # it is unclear whether these are HIPAA in i2b2 paper
-                'IPADDR', 'IPADDRESS'
-            ]]
+            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                         # it is unclear whether these are HIPAA in i2b2 paper
+                         'IPADDR', 'IPADDRESS']],
+            ['O', ['DOCTOR', 'HCPNAME'
+                   'PROFESSION',
+                   'STATE', 'COUNTRY', 'NATIONALITY'
+                   ]]
         ]
     elif grouping == 'binary':
         labels = [
             ['PHI', ['NAME', 'PATIENT', 'USERNAME',
+                     'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL'
                      'DOCTOR', 'HCPNAME',
                      'LOCATION', 'ORGANIZATION', 'HOSPITAL',
                      'PROTECTED_ENTITY', 'PROTECTED ENTITY',
@@ -63,12 +65,10 @@ def create_hamonize_label_dict(grouping='i2b2'):
                      'DATE', 'DATEYEAR',
                      'BIOID', 'DEVICE', 'HEALTHPLAN',
                      'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER',
-                     'EMAIL', 'FAX', 'PHONE', 'CONTACT']],
-            ['O', [
-                'PROFESSION',
-                # it is unclear whether these are HIPAA in i2b2 paper
-                'IPADDR', 'IPADDRESS'
-            ]]
+                     'EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                     'PROFESSION',
+                     'IPADDR', 'IPADDRESS']]
+            # , ['O', [ ]]
         ]
 
     else:
