@@ -43,7 +43,7 @@ from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 # custom tokenizer with subword tracking
 from bert_deid.model import convert_examples_to_features, BertForNER
 from bert_deid.tokenization import BertTokenizerNER
-from bert_deid.processors import i2b2DeidProcessor, hipaaDeidProcessor, CoNLLProcessor
+import bert_deid.processors as processors
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -77,7 +77,7 @@ def main(args):
                         default=None,
                         required=True,
                         type=str,
-                        choices=['i2b2', 'hipaa', 'conll'],
+                        choices=['i2b2', 'hipaa', 'conll', 'binary'],
                         help=("The name of the task to train. "
                               "Primarily defines the label set."))
     parser.add_argument("--model_path",
@@ -171,10 +171,11 @@ def main(args):
             address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
-    processors = {
-        "conll": CoNLLProcessor,
-        "hipaa": hipaaDeidProcessor,
-        "i2b2": i2b2DeidProcessor
+    proc_dict = {
+        "conll": processors.CoNLLProcessor,
+        "hipaa": processors.hipaaDeidProcessor,
+        "binary": processors.binaryDeidProcessor,
+        "i2b2": processors.i2b2DeidProcessor
     }
 
     if args.local_rank == -1 or args.no_cuda:
@@ -214,10 +215,10 @@ def main(args):
 
     task_name = args.task_name.lower()
 
-    if task_name not in processors:
+    if task_name not in proc_dict:
         raise ValueError("Task not found: %s" % (task_name))
 
-    processor = processors[task_name]()
+    processor = proc_dict[task_name]()
     label_list = processor.get_labels()
     num_labels = len(label_list)
 

@@ -134,6 +134,20 @@ class i2b2DeidProcessor(DeidProcessor):
         ]
 
 
+class binaryDeidProcessor(DeidProcessor):
+    """Processor for deid using binary PHI/no phi labels."""
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        return super(binaryDeidProcessor, self)._create_examples(
+            lines, set_type, grouping='binary')
+
+    def get_labels(self):
+        return [
+            'PHI', 'O'
+        ]
+
+
 class hipaaDeidProcessor(DeidProcessor):
     """Processor for deid using HIPAA labels."""
 
