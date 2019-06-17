@@ -20,5 +20,5 @@
     "bert_model": "bert-base-uncased",
     "quiet": "False",
     "no_cuda": "False",
-    "seed": 929834
+    "seed": 800656
 }
