@@ -31,7 +31,41 @@ make predictions on a test set and evaluate the model:
 
 calculate operating point statistics on that test set:
 
-`python python scripts/eval_pred.py  -c configs/test/i2b2-2014-rr-set-1-on-i2b2-2014-test.json`
+`python scripts/eval_pred.py  -c configs/test/i2b2-2014-rr-set-1-on-i2b2-2014-test.json`
+
+### dernoncourt_lee on quadro
+
+```sh
+python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
+python scripts/create_csv_config.py -c configs/train/token/dernoncourt_lee.json
+CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/train/token/dernoncourt_lee.json
+python scripts/create_train_tokens_file.py -c configs/train/token/dernoncourt_lee.json
+python scripts/run_and_eval_bert.py -c configs/train/token/dernoncourt_lee.json
+```
+
+### i2b2_2014 binary on quadro
+
+
+```sh
+python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
+python scripts/create_csv_config.py -c configs/train/binary/i2b2_2014.json
+CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/train/binary/i2b2_2014.json
+python scripts/create_train_tokens_file.py -c configs/train/binary/i2b2_2014.json
+python scripts/run_and_eval_bert.py -c configs/train/binary/i2b2_2014.json
+```
+
+
+### physionet on titanx
+
+
+```sh
+python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
+python scripts/create_csv_config.py -c configs/train/token/physionet.json
+CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/train/physionet.json
+python scripts/create_train_tokens_file.py -c configs/train/physionet.json
+python scripts/run_and_eval_bert.py -c configs/train/physionet.json
+python scripts/eval_pred.py  -c configs/train/physionet.json
+```
 
 ## Quickstart
 
