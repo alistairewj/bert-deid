@@ -106,9 +106,9 @@ def main():
                         default=100,
                         help='if method="overlap", the max number of tokens per ex.')
     # Other parameters
-    parser.add_argument("--no_cuda",
+    parser.add_argument("--use_cuda_for_eval",
                         action='store_true',
-                        help="Whether not to use CUDA when available")
+                        help="Use CUDA (not recommended)")
 
     args = parser.parse_args()
 
@@ -175,10 +175,10 @@ def main():
     gs_ext = argparse_dict['ref_extension']
     pred_ext = argparse_dict['pred_extension']
 
-    if argparse_dict['no_cuda']:
-        device = torch.device("cpu")
-    else:
+    if argparse_dict['use_cuda_for_eval']:
         device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
     n_gpu = torch.cuda.device_count()
     logger.info("device: {} n_gpu: {}".format(device, n_gpu))
 
