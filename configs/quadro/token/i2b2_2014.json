@@ -1,8 +1,14 @@
 {
-    "model_path": "/home/alistairewj/git/bert-deid/models/i2b2_2014",
-    "data_path": "/home/alistairewj/git/bert-deid/data/i2b2_2014",
+    "model_path": "/home/alistairewj/git/bert-deid/models/token/i2b2_2014",
+    "data_path": "/home/alistairewj/git/bert-deid/data/token/i2b2_2014",
     "input_path": "/data/deid-gs/i2b2_2014/train",
     "input_test_path": "/data/deid-gs/i2b2_2014/test",
+    "text_path": "/data/deid-gs/i2b2_2014/test/txt",
+    "ref_path": "/data/deid-gs/i2b2_2014/test/ann",
+    "pred_orig_path": "/home/alistairewj/git/bert-deid/pred/token/orig/i2b2_2014",
+    "pred_path": "/home/alistairewj/git/bert-deid/pred/token/i2b2_2014",
+    "pred_extension": "bert",
+    "csv_path": "/home/alistairewj/git/bert-deid/csv/token/i2b2_2014",
     "text_extension": "txt",
     "ref_extension": "gs",
     "task_name": "i2b2",
@@ -14,5 +20,5 @@
     "bert_model": "bert-base-uncased",
     "quiet": "False",
     "no_cuda": "False",
-    "seed": 7842
+    "seed": 800656
 }
