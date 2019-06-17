@@ -130,19 +130,19 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
             tokens, tokens_sw, tokens_idx, example.label,
             label_list, max_seq_length, tokenizer)
 
-        if ex_index < 5:
-            logger.info("*** Example ***")
-            logger.info("guid: %s" % (example.guid))
-            logger.info("tokens: %s" % " ".join(
-                [str(x) for x in tokens]))
-            logger.info("input_ids: %s" %
-                        " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s" %
-                        " ".join([str(x) for x in input_mask]))
-            logger.info(
-                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-            logger.info("label_ids: %s" %
-                        " ".join([str(x) for x in label_ids]))
+        # if ex_index < 5:
+        #     logger.info("*** Example ***")
+        #     logger.info("guid: %s" % (example.guid))
+        #     logger.info("tokens: %s" % " ".join(
+        #         [str(x) for x in tokens]))
+        #     logger.info("input_ids: %s" %
+        #                 " ".join([str(x) for x in input_ids]))
+        #     logger.info("input_mask: %s" %
+        #                 " ".join([str(x) for x in input_mask]))
+        #     logger.info(
+        #         "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+        #     logger.info("label_ids: %s" %
+        #                 " ".join([str(x) for x in label_ids]))
 
         features.append(
             InputFeatures(input_ids=input_ids,
