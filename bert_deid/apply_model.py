@@ -28,7 +28,7 @@ from bert_deid.tokenization import BertTokenizerNER
 from bert_deid import processors
 from bert_deid.model import prepare_tokens, BertForNER, InputFeatures
 from bert_deid.create_csv import split_by_overlap, split_by_sentence
-from bert_deid.describe_data import harmonize_label
+from bert_deid.utils import harmonize_label
 from bert_deid.bert_multilabel import BertMultiLabel
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',

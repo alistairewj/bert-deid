@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from bert_deid.tokenization import BertTokenizerNER
-from bert_deid.describe_data import harmonize_label
+from bert_deid.utils import harmonize_label
 
 
 def argparser(args):

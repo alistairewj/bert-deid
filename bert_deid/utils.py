@@ -9,13 +9,76 @@ import warnings
 import re
 
 from sympy import Interval, Union
-from bert_deid.describe_data import harmonize_label
 from bert_deid import model
 from pytorch_pretrained_bert.modeling import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.modeling import BertConfig
 from tqdm import tqdm
 import torch
 import pandas as pd
+
+
+def harmonize_label(label, grouping='i2b2'):
+    """
+    Groups entities into one of the i2b2 2014 categories. Each dataset has a
+    slightly different set of entities. This harmonizes them.
+
+    Args:
+        label (str): label to be harmonized (e.g. 'USERNAME').
+
+    Returns:
+        harmonized (str): the harmonized label (e.g. 'NAME')..
+    """
+
+    # default harmonization is into i2b2 form
+    labels = [
+        ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
+                  'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
+        ['PROFESSION', ['PROFESSION']],
+        ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION',
+                      'STREET', 'STATE',
+                      'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
+                      'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                      'NATIONALITY']],
+        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+        ['DATE', ['DATE', 'DATEYEAR']],
+        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
+                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
+        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'URL',
+                     'IPADDR', 'IPADDRESS', 'CONTACT']]
+    ]
+
+    if grouping == 'i2b2':
+        pass
+    elif grouping == 'hipaa':
+        labels = [
+            ['NAME', ['NAME', 'PATIENT', 'USERNAME']],
+            ['LOCATION', ['LOCATION', 'ORGANIZATION',
+                          'STREET', 'CITY', 'ZIP', ]],
+            ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+            ['DATE', ['DATE', 'DATEYEAR']],
+            ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
+                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
+            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT']],
+            ['O', [
+                'DOCTOR', 'HCPNAME',
+                'PROFESSION', 'HOSPITAL',
+                'ORGANIZATION', 'STATE', 'COUNTRY',
+                'LOCATION-OTHER',
+                'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                'NATIONALITY',
+                # it is unclear whether these are HIPAA in i2b2 paper
+                'URL', 'IPADDR', 'IPADDRESS'
+            ]]
+        ]
+    else:
+        raise ValueError(f'Unrecognized grouping {grouping}')
+
+    label_to_type = {}
+    for label_map in labels:
+        for l in label_map[1]:
+            label_to_type[l] = label_map[0]
+
+    return label_to_type[label.upper()]
 
 
 def combine_entity_types(df, lowercase=True):
