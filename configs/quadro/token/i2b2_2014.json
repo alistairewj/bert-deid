@@ -1,0 +1,18 @@
+{
+    "model_path": "/home/alistairewj/git/bert-deid/models/i2b2_2014",
+    "data_path": "/home/alistairewj/git/bert-deid/data/i2b2_2014",
+    "input_path": "/data/deid-gs/i2b2_2014/train",
+    "input_test_path": "/data/deid-gs/i2b2_2014/test",
+    "text_extension": "txt",
+    "ref_extension": "gs",
+    "task_name": "i2b2",
+    "group_tags": "True",
+    "method": "overlap",
+    "max_seq_length": 128,
+    "sequence_length": 100,
+    "step_size": 40,
+    "bert_model": "bert-base-uncased",
+    "quiet": "False",
+    "no_cuda": "False",
+    "seed": 7842
+}
