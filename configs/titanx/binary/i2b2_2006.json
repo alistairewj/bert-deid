@@ -11,7 +11,7 @@
     "csv_path": "/enc_data/bert-deid/csv/binary/i2b2_2006",
     "text_extension": "txt",
     "ref_extension": "gs",
-    "task_name": "hipaa",
+    "task_name": "binary",
     "group_tags": "True",
     "method": "overlap",
     "max_seq_length": 128,
