@@ -29,25 +29,48 @@ def create_hamonize_label_dict(grouping='i2b2'):
         ]
     elif grouping == 'hipaa':
         labels = [
-            ['NAME', ['NAME', 'PATIENT', 'USERNAME']],
-            ['LOCATION', ['LOCATION', 'ORGANIZATION',
-                          'STREET', 'CITY', 'ZIP', ]],
+            ['NAME', ['NAME', 'PATIENT', 'USERNAME',
+                      'DOCTOR', 'HCPNAME']],
+            ['LOCATION', ['LOCATION', 'ORGANIZATION', 'HOSPITAL',
+                          'STREET', 'CITY', 'STATE', 'COUNTRY', 'ZIP',
+                          'NATIONALITY', 'URL',
+                          'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                          'LOCATION-OTHER']],
             ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
             ['DATE', ['DATE', 'DATEYEAR']],
             ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
                     'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
             ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT']],
             ['O', [
-                'DOCTOR', 'HCPNAME',
-                'PROFESSION', 'HOSPITAL',
-                'ORGANIZATION', 'STATE', 'COUNTRY',
-                'LOCATION-OTHER',
-                'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                'NATIONALITY',
+                'PROFESSION',
                 # it is unclear whether these are HIPAA in i2b2 paper
-                'URL', 'IPADDR', 'IPADDRESS'
+                'IPADDR', 'IPADDRESS'
             ]]
         ]
+    elif grouping == 'binary':
+        labels = [
+            ['PHI', ['NAME', 'PATIENT', 'USERNAME',
+                     'DOCTOR', 'HCPNAME',
+                     'LOCATION', 'ORGANIZATION', 'HOSPITAL',
+                     'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                     'LOCATION-OTHER',
+                     'STREET', 'CITY', 'ZIP',
+                     'STATE', 'COUNTRY',
+                     'NATIONALITY',
+                     # two URLs in i2b2 which aren't URLs but web service names
+                     'URL',
+                     'AGE', 'AGE_>_89', 'AGE > 89',
+                     'DATE', 'DATEYEAR',
+                     'BIOID', 'DEVICE', 'HEALTHPLAN',
+                     'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER',
+                     'EMAIL', 'FAX', 'PHONE', 'CONTACT']],
+            ['O', [
+                'PROFESSION',
+                # it is unclear whether these are HIPAA in i2b2 paper
+                'IPADDR', 'IPADDRESS'
+            ]]
+        ]
+
     else:
         raise ValueError(f'Unrecognized grouping {grouping}')
 
