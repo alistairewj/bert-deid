@@ -48,7 +48,7 @@ def argparser(args):
     parser.add_argument("--task_name",
                         default='i2b2',
                         type=str,
-                        choices=['i2b2', 'hipaa'],
+                        choices=['i2b2', 'hipaa', 'binary'],
                         help="Defines the label set.")
     parser.add_argument('-g', '--group_tags', action='store_true',
                         help='group tags into categories.')
