@@ -37,10 +37,10 @@ calculate operating point statistics on that test set:
 
 ```sh
 python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
-python scripts/create_csv_config.py -c configs/train/token/dernoncourt_lee.json
-CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/train/token/dernoncourt_lee.json
-python scripts/create_train_tokens_file.py -c configs/train/token/dernoncourt_lee.json
-python scripts/run_and_eval_bert.py -c configs/train/token/dernoncourt_lee.json
+python scripts/create_csv_config.py -c configs/quadro/token/dernoncourt_lee.json
+CUDA_VISIBLE_DEVICES=0 python scripts/train_bert_config.py -c configs/quadro/token/dernoncourt_lee.json
+python scripts/create_train_tokens_file.py -c configs/quadro/token/dernoncourt_lee.json
+python scripts/run_and_eval_bert.py -c configs/quadro/token/dernoncourt_lee.json
 ```
 
 ### i2b2_2014 binary on quadro
