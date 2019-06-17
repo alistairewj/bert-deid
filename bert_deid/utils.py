@@ -1,19 +1,9 @@
-from __future__ import absolute_import, division, print_function
-
-import json
 import os
-import logging
-import csv
-import argparse
 import warnings
 import re
 
 from sympy import Interval, Union
-from bert_deid import model
-from pytorch_pretrained_bert.modeling import WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.modeling import BertConfig
 from tqdm import tqdm
-import torch
 import pandas as pd
 
 
