@@ -91,11 +91,8 @@ class DeidProcessor(DataProcessor):
         # outputs the list of valid labels
         raise NotImplementedError()
 
-    def _create_examples(self, lines, set_type, grouping=None):
+    def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
-
-        if grouping is not None:
-            label_to_type = create_hamonize_label_dict(grouping=grouping)
 
         examples = []
         for (i, line) in enumerate(lines):
@@ -109,10 +106,6 @@ class DeidProcessor(DataProcessor):
             # call eval on the string to convert this to a list
             label = eval(line[2])
 
-            # harmonize the labels according to our task
-            for i, l in enumerate(label):
-                label[i][2] = label_to_type[l[2]]
-
             examples.append(
                 InputExample(guid=guid, text_a=text_a, label=label))
         return examples
@@ -120,11 +113,6 @@ class DeidProcessor(DataProcessor):
 
 class i2b2DeidProcessor(DeidProcessor):
     """Processor for deid using i2b2 labels."""
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        return super(i2b2DeidProcessor, self)._create_examples(
-            lines, set_type, grouping='i2b2')
 
     def get_labels(self):
         return [
@@ -137,11 +125,6 @@ class i2b2DeidProcessor(DeidProcessor):
 class binaryDeidProcessor(DeidProcessor):
     """Processor for deid using binary PHI/no phi labels."""
 
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        return super(binaryDeidProcessor, self)._create_examples(
-            lines, set_type, grouping='binary')
-
     def get_labels(self):
         return [
             'PHI', 'O'
@@ -150,11 +133,6 @@ class binaryDeidProcessor(DeidProcessor):
 
 class hipaaDeidProcessor(DeidProcessor):
     """Processor for deid using HIPAA labels."""
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        return super(hipaaDeidProcessor, self)._create_examples(
-            lines, set_type, grouping='hipaa')
 
     def get_labels(self):
         return [
