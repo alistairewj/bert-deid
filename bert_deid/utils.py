@@ -17,38 +17,26 @@ import torch
 import pandas as pd
 
 
-def harmonize_label(label, grouping='i2b2'):
-    """
-    Groups entities into one of the i2b2 2014 categories. Each dataset has a
-    slightly different set of entities. This harmonizes them.
-
-    Args:
-        label (str): label to be harmonized (e.g. 'USERNAME').
-
-    Returns:
-        harmonized (str): the harmonized label (e.g. 'NAME')..
-    """
-
-    # default harmonization is into i2b2 form
-    labels = [
-        ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
-                  'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
-        ['PROFESSION', ['PROFESSION']],
-        ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION',
-                      'STREET', 'STATE',
-                      'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
-                      'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                      'NATIONALITY']],
-        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
-        ['DATE', ['DATE', 'DATEYEAR']],
-        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
-                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'URL',
-                     'IPADDR', 'IPADDRESS', 'CONTACT']]
-    ]
-
+def create_hamonize_label_dict(grouping='i2b2'):
+    """Create a dictionary for mapping labels to standard categories."""
     if grouping == 'i2b2':
-        pass
+        # default harmonization is into i2b2 form
+        labels = [
+            ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
+                      'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
+            ['PROFESSION', ['PROFESSION']],
+            ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION',
+                          'STREET', 'STATE',
+                          'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
+                          'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                          'NATIONALITY']],
+            ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+            ['DATE', ['DATE', 'DATEYEAR']],
+            ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
+                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
+            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'URL',
+                         'IPADDR', 'IPADDRESS', 'CONTACT']]
+        ]
     elif grouping == 'hipaa':
         labels = [
             ['NAME', ['NAME', 'PATIENT', 'USERNAME']],
@@ -78,6 +66,23 @@ def harmonize_label(label, grouping='i2b2'):
         for l in label_map[1]:
             label_to_type[l] = label_map[0]
 
+    return label_to_type
+
+
+def harmonize_label(label, grouping='i2b2'):
+    """
+    Groups entities into one of the i2b2 2014 categories. Each dataset has a
+    slightly different set of entities. This harmonizes them.
+    Re-creates the mapping dictionary for each call.
+
+    Args:
+        label (str): label to be harmonized (e.g. 'USERNAME').
+
+    Returns:
+        harmonized (str): the harmonized label (e.g. 'NAME')..
+    """
+
+    label_to_type = create_hamonize_label_dict(grouping)
     return label_to_type[label.upper()]
 
 
