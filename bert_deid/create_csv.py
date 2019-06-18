@@ -311,6 +311,11 @@ def main(args):
         tokenizer = BertTokenizerNER.from_pretrained(
             args.bert_model, do_lower_case=do_lower_case)
 
+    if args.group_tags:
+        label_dict = create_hamonize_label_dict(grouping=args.task_name)
+    else:
+        label_dict = None
+
     for doc_id in records:
         # read PHI annotations
         df = pd.read_csv(os.path.join(ann_path, doc_id + '.gs'))
@@ -356,15 +361,15 @@ def main(args):
         example = [[doc_id] + x for x in example]
 
         # if requested, harmonize tags using fixed dictionary
-        if args.group_tags:
+        if label_dict is not None:
             # for each example
             for i in range(len(example_ann)):
                 # for each entity tagged in this example
                 # (if no entities, this for loop does not run)
                 for k in range(len(example_ann[i])):
                     # update the entity (element 2) using label_to_type dict
-                    example_ann[i][k][2] = harmonize_label(
-                        example_ann[i][k][2], grouping=args.task_name)
+                    example_ann[i][k][2] = label_dict[example_ann[i]
+                                                      [k][2].upper()]
         # save to master list
         examples.extend(example)
         annotations.extend(example_ann)
