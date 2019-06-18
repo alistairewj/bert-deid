@@ -61,6 +61,8 @@ def main(args):
         create_csv_args['input_path'] = config['input_test_path']
         csv_arg_list = arg_dict_to_list(create_csv_args)
         create_csv.main(csv_arg_list)
+    # reset the input_path for training set generation later
+    create_csv_args['input_path'] = config['input_path']
 
     # hard-coded list of parameters for bert training
     bert_arg_names = [
