@@ -18,6 +18,7 @@
     "sequence_length": 100,
     "step_size": 40,
     "bert_model": "bert-base-uncased",
+    "do_lower_case": "True",
     "quiet": "False",
     "no_cuda": "False",
     "seed": 7844
