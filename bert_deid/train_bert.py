@@ -41,7 +41,7 @@ from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
-from bert_deid.model import convert_examples_to_features, BertForNER
+from bert_deid.model import prepare_tokens, BertForNER
 from bert_deid.tokenization import BertTokenizerNER
 import bert_deid.processors as processors
 
@@ -59,6 +59,70 @@ def segment_ids(self, segment1_len, segment2_len):
 def accuracy(out, labels):
     outputs = np.argmax(out, axis=-1)
     return np.sum(outputs == labels)
+
+
+def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer):
+    """Loads a data file into a list of `InputBatch`s."""
+
+    features = []
+    for (ex_index, example) in enumerate(examples):
+        # track offsets in tokenization
+        tokens_a, tokens_a_sw, tokens_a_idx = tokenizer.tokenize_with_index(
+            example.text_a)
+
+        # Account for [CLS] and [SEP] with "- 2"
+        if len(tokens_a) > max_seq_length - 2:
+            tokens_a = tokens_a[:(max_seq_length - 2)]
+            tokens_a_sw = tokens_a_sw[:(max_seq_length - 2)]
+            tokens_a_idx = tokens_a_idx[:(max_seq_length - 2)]
+
+        # The convention in BERT is:
+        # (a) For sequence pairs:
+        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+        #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
+        # (b) For single sequences:
+        #  tokens:   [CLS] the dog is hairy . [SEP]
+        #  type_ids: 0   0   0   0  0     0 0
+        #
+        # Where "type_ids" are used to indicate whether this is the first
+        # sequence or the second sequence. The embedding vectors for `type=0` and
+        # `type=1` were learned during pre-training and are added to the wordpiece
+        # embedding vector (and position vector). This is not *strictly* necessary
+        # since the [SEP] token unambigiously separates the sequences, but it makes
+        # it easier for the model to learn the concept of sequences.
+        #
+        # For classification tasks, the first vector (corresponding to [CLS]) is
+        # used as as the "sentence vector". Note that this only makes sense because
+        # the entire model is fine-tuned.
+        tokens = ["[CLS]"] + tokens_a + ["[SEP]"]
+        tokens_sw = [0] + tokens_a_sw + [0]
+        tokens_idx = [[-1]] + tokens_a_idx + [[-1]]
+
+        input_ids, input_mask, segment_ids, label_ids = prepare_tokens(
+            tokens, tokens_sw, tokens_idx, example.label,
+            label_list, max_seq_length, tokenizer)
+
+        # print out the first five examples
+        if ex_index < 5:
+            logger.info("*** Example ***")
+            logger.info("guid: %s" % (example.guid))
+            logger.info("tokens: %s" % " ".join(
+                [str(x) for x in tokens]))
+            logger.info("input_ids: %s" %
+                        " ".join([str(x) for x in input_ids]))
+            logger.info("input_mask: %s" %
+                        " ".join([str(x) for x in input_mask]))
+            logger.info(
+                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+            logger.info("label_ids: %s" %
+                        " ".join([str(x) for x in label_ids]))
+
+        features.append(
+            InputFeatures(input_ids=input_ids,
+                          input_mask=input_mask,
+                          segment_ids=segment_ids,
+                          label_ids=label_ids))
+    return features
 
 
 def main(args):
@@ -302,6 +366,7 @@ def main(args):
     if args.do_train:
         train_features = convert_examples_to_features(
             train_examples, label_list, args.max_seq_length, tokenizer)
+
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size)
