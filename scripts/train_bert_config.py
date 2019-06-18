@@ -24,7 +24,8 @@ def main(args):
     # hard-coded list of parameters for bert training
     bert_arg_list = [
         'data_path', 'bert_model', 'task_name', 'model_path',
-        'cache_dir', 'max_seq_length', 'do_train', 'finetune',
+        'cache_dir', 'sequence_length', 'max_seq_length',
+        'do_train', 'finetune',
         'do_eval', 'do_lower_case', 'train_batch_size',
         'eval_batch_size', 'learning_rate', 'num_train_epochs',
         'warmup_proportion', 'no_cuda', 'local_rank', 'seed',

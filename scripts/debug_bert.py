@@ -169,7 +169,7 @@ def main():
         # Load a trained model and config that you have fine-tuned
         bert_model = model.BertForDEID(
             model_dir=argparse_dict['model_path'],
-            max_seq_length=argparse_dict['sequence_length'],
+            sequence_length=argparse_dict['sequence_length'],
             token_step_size=argparse_dict['step_size']
         )
     else:
@@ -206,7 +206,7 @@ def main():
     examples = split_by_overlap(
         text, bert_model.tokenizer,
         token_step_size=bert_model.token_step_size,
-        max_seq_len=bert_model.max_seq_length
+        sequence_length=bert_model.sequence_length
     )
 
     for e, example in enumerate(examples):

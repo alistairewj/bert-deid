@@ -200,7 +200,7 @@ def main():
         # Load a trained model and config that you have fine-tuned
         bert_model = model.BertForDEID(
             model_dir=argparse_dict['model_path'],
-            max_seq_length=argparse_dict['sequence_length'],
+            sequence_length=argparse_dict['sequence_length'],
             token_step_size=argparse_dict['step_size'],
             task_name=argparse_dict['task_name']
         )

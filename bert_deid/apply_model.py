@@ -222,7 +222,7 @@ def main():
             examples = split_by_overlap(
                 text, tokenizer,
                 token_step_size=args.step_size,
-                max_seq_len=args.sequence_length
+                sequence_length=args.sequence_length
             )
 
         for e, example in enumerate(examples):

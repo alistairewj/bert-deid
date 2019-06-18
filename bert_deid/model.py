@@ -134,8 +134,9 @@ class BertForDEID(BertForNER):
     """BERT model for deidentification."""
 
     def __init__(self, model_dir,
-                 max_seq_length=100,
                  token_step_size=100,
+                 sequence_length=100,
+                 max_seq_length=128,
                  task_name='i2b2'):
 
         # use the associated data processor to define label set
@@ -153,8 +154,12 @@ class BertForDEID(BertForNER):
         self.label_id_map = {i: label for i, label in enumerate(self.labels)}
 
         # by default, we do non-overlapping segments of text
-        self.max_seq_length = max_seq_length
         self.token_step_size = token_step_size
+        # sequence_length is how long each example for the model is
+        self.sequence_length = sequence_length
+        # max seq length is what we pad the model to
+        # max seq length should always be >= sequence_length + 2
+        self.max_seq_length = max_seq_length
 
         # load trained config/weights
         model_file = os.path.join(model_dir, WEIGHTS_NAME)
@@ -213,6 +218,7 @@ class BertForDEID(BertForNER):
 
         return input_ids, input_mask, segment_ids
 
+    @profile
     def annotate(self, text, annotations=None, document_id=None, column=None,
                  **kwargs):
         # annotate a string of text
@@ -222,65 +228,76 @@ class BertForDEID(BertForNER):
         examples = split_by_overlap(
             text, self.tokenizer,
             token_step_size=self.token_step_size,
-            max_seq_len=self.max_seq_length
+            sequence_length=self.sequence_length
         )
 
         anns = list()
 
         # examples is a list of lists, each sub-list has 4 elements:
         #   sentence number, start index, end index, text of the sentence
+
+        # convert examples into tokens/input ids to run through the model
+        ex_tokens, ex_tokens_sw, ex_tokens_idx = [], [], []
+        last_token_idx = []
+        input_ids, input_mask, segment_ids = [], [], []
         for e, example in enumerate(examples):
             # track offsets in tokenization
             tokens, tokens_sw, tokens_idx = self.tokenizer.tokenize_with_index(
                 example[3])
 
-            # offset index of predictions based upon example start
-            tokens_offset = example[1]
+            # retain original tokens
+            ex_tokens.append(tokens)
+            ex_tokens_sw.append(tokens_sw)
+            ex_tokens_idx.append(tokens_idx)
+            last_token_idx.append(len(tokens))
 
+            # add stop chars etc for inputs
             tokens = ["[CLS]"] + tokens + ["[SEP]"]
             tokens_sw = [0] + tokens_sw + [0]
             tokens_idx = [[-1]] + tokens_idx + [[-1]]
 
-            input_ids, input_mask, segment_ids = self._prepare_tokens(
+            input_ids_e, input_mask_e, segment_ids_e = self._prepare_tokens(
                 tokens, tokens_sw, tokens_idx
             )
+            input_ids.append(input_ids_e)
+            input_mask.append(input_mask_e)
+            segment_ids.append(segment_ids_e)
 
-            # convert to tensor
-            input_ids = torch.tensor(input_ids, dtype=torch.long)
-            input_mask = torch.tensor(input_mask, dtype=torch.long)
-            segment_ids = torch.tensor(segment_ids, dtype=torch.long)
+        # with the IDs prepared, run through model for predictions
+        input_ids = torch.tensor(input_ids, dtype=torch.long)
+        input_mask = torch.tensor(input_mask, dtype=torch.long)
+        segment_ids = torch.tensor(segment_ids, dtype=torch.long)
 
-            # reshape to [1, SEQ_LEN] as this is expected by model
+        if len(examples) == 1:
+            # need to reshape IDs to [1, SEQ_LEN] if only 1 example for this text
             input_ids = input_ids.view([1, input_ids.size(0)])
             input_mask = input_mask.view([1, input_mask.size(0)])
             segment_ids = segment_ids.view([1, segment_ids.size(0)])
 
-            # make predictions
-            with torch.no_grad():
-                logits = self.forward(input_ids, segment_ids, input_mask)
+        with torch.no_grad():
+            logits = self.forward(input_ids, segment_ids, input_mask)
 
-            # convert to list // get the first element as we have only 1 example
-            scores = logits.tolist()[0]
-            pred = np.argmax(logits, axis=-1).tolist()[0]
-
-            # remove [CLS] at beginning
-            tokens = tokens[1:]
-            tokens_sw = tokens_sw[1:]
-            tokens_idx = tokens_idx[1:]
-            pred = pred[1:]
-            scores = scores[1:]
-
-            # subselect pred and mask down to length of tokens
-            last_token = tokens.index('[SEP]')
-            tokens = tokens[:last_token]
-            tokens_sw = tokens_sw[:last_token]
-            tokens_idx = tokens_idx[:last_token]
-            pred = pred[:last_token]
-            scores = scores[:last_token]
+        for e, example in enumerate(examples):
+            tokens = ex_tokens[e]
+            tokens_sw = ex_tokens_sw[e]
+            tokens_idx = ex_tokens_idx[e]
+            tokens_offset = example[1]
 
             if len(tokens) == 0:
                 # no data for predictions
                 continue
+
+            # get logits as list
+            scores = logits[e, :, :]
+            pred = np.argmax(scores, axis=-1).tolist()
+            scores = scores.tolist()
+
+            # remove [CLS]/[SEP] chars
+            scores = scores[1:]
+            pred = pred[1:]
+
+            scores = scores[:last_token_idx[e]]
+            pred = pred[:last_token_idx[e]]
 
             # the model does not make predictions for sub-words
             # the first word-part for a segmented sub-word is used as the prediction
