@@ -101,8 +101,10 @@ def main(args):
             'pred_orig_path': os.path.join(config['pred_orig_path'], subset)
         }
         for c in paths_update:
-            create_csv_args[c] = paths_update[c]
-            bert_args[c] = paths_update[c]
+            if c in csv_arg_names:
+                create_csv_args[c] = paths_update[c]
+            if c in bert_arg_names:
+                bert_args[c] = paths_update[c]
 
         print(f'Generating CSV for {d}% of data')
         csv_arg_list = arg_dict_to_list(create_csv_args)
