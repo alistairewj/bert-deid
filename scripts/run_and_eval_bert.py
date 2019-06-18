@@ -136,6 +136,12 @@ def main():
             logger.info(
                 '*** Not saving predictions to file as no pred folder given ***')
 
+    if not os.path.exists(argparse_dict['pred_orig_path']):
+        os.makedirs(argparse_dict['pred_orig_path'])
+
+    if not os.path.exists(argparse_dict['pred_path']):
+        os.makedirs(argparse_dict['pred_path'])
+
     # brat prep
     if argparse_dict['brat_path'] is not None:
         # ensure folder exists
