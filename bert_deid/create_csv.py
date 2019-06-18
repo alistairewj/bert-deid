@@ -140,13 +140,13 @@ def split_by_overlap(text, tokenizer,
     np.maximum.accumulate(idx, axis=0, out=idx)
     tokens_start[mask] = tokens_start[idx[mask]]
 
-    if len(tokens) <= max_seq_len:
+    if len(tokens) <= sequence_length:
         # very short text - only create one example
         seq_offsets = [[tokens_start[0], len(text)]]
     else:
-        seq_offsets = range(0, len(tokens) - max_seq_len, token_step_size)
+        seq_offsets = range(0, len(tokens) - sequence_length, token_step_size)
         last_offset = seq_offsets[-1] + token_step_size
-        seq_offsets = [[tokens_start[x], tokens_start[x + max_seq_len]]
+        seq_offsets = [[tokens_start[x], tokens_start[x + sequence_length]]
                        for x in seq_offsets]
 
         # last example always goes to the end of the text
@@ -338,7 +338,7 @@ def main(args):
             example = split_by_overlap(
                 text, tokenizer,
                 token_step_size=args.step_size,
-                max_seq_len=args.sequence_length
+                sequence_length=args.sequence_length
             )
 
         example_ann = create_ann(example, df)
