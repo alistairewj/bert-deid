@@ -201,7 +201,8 @@ def main():
         bert_model = model.BertForDEID(
             model_dir=argparse_dict['model_path'],
             max_seq_length=argparse_dict['sequence_length'],
-            token_step_size=argparse_dict['step_size']
+            token_step_size=argparse_dict['step_size'],
+            task_name=argparse_dict['task_name']
         )
     else:
         raise ValueError('Folder %s did not have model and config file.',

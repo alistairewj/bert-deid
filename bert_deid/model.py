@@ -13,6 +13,7 @@ from pytorch_pretrained_bert.modeling import BertForTokenClassification
 
 from bert_deid.create_csv import split_by_overlap
 from bert_deid.tokenization import BertTokenizerNER
+import bert_deid.processors as processors
 
 
 def segment_ids(self, segment1_len, segment2_len):
@@ -207,12 +208,20 @@ class BertForDEID(BertForNER):
 
     def __init__(self, model_dir,
                  max_seq_length=100,
-                 token_step_size=100):
-        self.labels = [
-            'NAME', 'LOCATION', 'AGE',
-            'DATE', 'ID', 'CONTACT', 'O',
-            'PROFESSION'
-        ]
+                 token_step_size=100,
+                 task_name='i2b2'):
+
+        # use the associated data processor to define label set
+        proc_dict = {
+            "conll": processors.CoNLLProcessor,
+            "hipaa": processors.hipaaDeidProcessor,
+            "binary": processors.binaryDeidProcessor,
+            "i2b2": processors.i2b2DeidProcessor
+        }
+        if task_name not in proc_dict:
+            raise ValueError('Unrecognized task: %s', task_name)
+
+        self.labels = proc_dict[task_name]().get_labels()
         self.num_labels = len(self.labels)
         self.label_id_map = {i: label for i, label in enumerate(self.labels)}
 
