@@ -218,7 +218,6 @@ class BertForDEID(BertForNER):
 
         return input_ids, input_mask, segment_ids
 
-    @profile
     def annotate(self, text, annotations=None, document_id=None, column=None,
                  **kwargs):
         # annotate a string of text
