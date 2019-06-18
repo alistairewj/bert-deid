@@ -591,13 +591,14 @@ def main(args):
             stats['se'][lbl] = tp[lbl]/(tp[lbl] + fn[lbl])
             stats['p+'][lbl] = tp[lbl]/(tp[lbl] + fp[lbl])
             stats['f1'][lbl] = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
+            result[lbl + '_se'] = stats['se'][lbl]
+            result[lbl + '_ppv'] = stats['ppv'][lbl]
             result[lbl + '_f1'] = stats['f1'][lbl]
 
         output_eval_file = os.path.join(args.model_path, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results *****")
             for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
         # print out stats from running tallies
