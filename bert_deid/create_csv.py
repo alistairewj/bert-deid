@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from bert_deid.tokenization import BertTokenizerNER
-from bert_deid.utils import harmonize_label
+from bert_deid.utils import create_hamonize_label_dict
 
 
 def argparser(args):
@@ -45,6 +45,10 @@ def argparser(args):
                               ' (default: do not create a CSV.)'))
 
     # optional arguments
+    parser.add_argument("--subset",
+                        default=100,
+                        type=int,
+                        help="Percent of data to subset training to.")
     parser.add_argument("--task_name",
                         default='i2b2',
                         type=str,
@@ -73,8 +77,14 @@ def argparser(args):
                         help="BERT pre-trained model for tokenization")
     parser.add_argument('-q', '--quiet', action='store_true',
                         help='suppress peasants discussing their work')
+    args_out = parser.parse_args(args)
 
-    return parser.parse_args(args)
+    if args_out.subset:
+        if args_out.subset < 1:
+            parser.error('Minimum subset percentage is 1')
+        elif args_out.subset > 100:
+            parser.error('Maximum subset percentage is 100')
+    return args_out
 
 
 # our dataframe will have consistent columns
@@ -288,6 +298,16 @@ def main(args):
     if len(records) == 0:
         print(f'No files with both text and annotations.')
         return
+
+    records.sort()
+
+    if args.subset < 100:
+        n_subset = int(float(len(records))/100.0*args.subset)
+        if n_subset == 0:
+            print(f'Percentage would result in {n_subset} records.')
+            print('Retaining 1 record.')
+            n_subset = 1
+        records = records[:n_subset]
 
     examples = list()
     annotations = list()
