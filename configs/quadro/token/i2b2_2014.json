@@ -21,5 +21,6 @@
     "do_lower_case": "True",
     "quiet": "False",
     "no_cuda": "False",
+    "use_cuda_for_eval": "True",
     "seed": 800656
 }
