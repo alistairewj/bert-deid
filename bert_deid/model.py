@@ -220,8 +220,11 @@ class BertForDEID(BertForNER):
 
     def annotate(self, text, annotations=None, document_id=None, column=None,
                  **kwargs):
-        # annotate a string of text
+        device = (torch.device("cuda")
+                  if next(self.parameters()).is_cuda
+                  else "cpu")
 
+        # annotate a string of text
         # split the text into examples
         # we choose non-overlapping examples for evaluation
         examples = split_by_overlap(
@@ -273,8 +276,16 @@ class BertForDEID(BertForNER):
             input_mask = input_mask.view([1, input_mask.size(0)])
             segment_ids = segment_ids.view([1, segment_ids.size(0)])
 
+        if next(self.parameters()).is_cuda:
+            input_ids = input_ids.to(device)
+            input_mask = input_mask.to(device)
+            segment_ids = segment_ids.to(device)
+
         with torch.no_grad():
             logits = self.forward(input_ids, segment_ids, input_mask)
+
+        if next(self.parameters()).is_cuda:
+            logits.to('cpu')
 
         for e, example in enumerate(examples):
             tokens = ex_tokens[e]
