@@ -285,7 +285,7 @@ class BertForDEID(BertForNER):
             logits = self.forward(input_ids, segment_ids, input_mask)
 
         if next(self.parameters()).is_cuda:
-            logits.cpu().numpy()
+            logits = logits.cpu().numpy()
 
         for e, example in enumerate(examples):
             tokens = ex_tokens[e]
