@@ -270,12 +270,6 @@ class BertForDEID(BertForNER):
         input_mask = torch.tensor(input_mask, dtype=torch.long)
         segment_ids = torch.tensor(segment_ids, dtype=torch.long)
 
-        if len(examples) == 1:
-            # need to reshape IDs to [1, SEQ_LEN] if only 1 example for this text
-            input_ids = input_ids.view([1, input_ids.size(0)])
-            input_mask = input_mask.view([1, input_mask.size(0)])
-            segment_ids = segment_ids.view([1, segment_ids.size(0)])
-
         if next(self.parameters()).is_cuda:
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
