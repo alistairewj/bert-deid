@@ -1,0 +1,9 @@
+# text
+nltk
+# progress bars
+tqdm
+# numbers
+numpy
+pandas
+# modelling
+torch
