@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import argparse
+import shutil
 
 from bert_deid import train_bert
 from bert_deid import create_csv
@@ -111,6 +112,12 @@ def main(args):
         print(f'Generating CSV for {d}% of data')
         csv_arg_list = arg_dict_to_list(create_csv_args)
         create_csv.main(csv_arg_list)
+
+        # copy test set to this subfolder
+        shutil.copyfile(
+            os.path.join(config['data_path'], 'test.csv'),
+            os.path.join(config['data_path'], subset, 'test.csv')
+        )
 
         print('Training model.')
         bert_arg_list = arg_dict_to_list(bert_args)
