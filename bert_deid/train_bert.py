@@ -592,7 +592,7 @@ def main(args):
             stats['p+'][lbl] = tp[lbl]/(tp[lbl] + fp[lbl])
             stats['f1'][lbl] = (2*tp[lbl])/(2*tp[lbl] + fn[lbl] + fp[lbl])
             result[lbl + '_se'] = stats['se'][lbl]
-            result[lbl + '_ppv'] = stats['ppv'][lbl]
+            result[lbl + '_p+'] = stats['p+'][lbl]
             result[lbl + '_f1'] = stats['f1'][lbl]
 
         output_eval_file = os.path.join(args.model_path, "eval_results.txt")
