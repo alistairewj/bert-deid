@@ -84,7 +84,7 @@ class DeidProcessor(DataProcessor):
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_csv(os.path.join(data_dir, "dev.csv")), "dev")
+            self._read_csv(os.path.join(data_dir, "test.csv")), "dev")
 
     def get_labels(self):
         # created by subclass!
