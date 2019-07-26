@@ -9,3 +9,5 @@ sympy==1.4
 # modelling
 torch==1.1.0
 pytorch-pretrained-bert==0.6.2
+# testing
+pytest==4.2.0
