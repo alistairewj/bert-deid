@@ -1,0 +1,11 @@
+# text
+nltk==3.4.3
+# progress bars
+tqdm==4.32.1
+# numbers
+numpy==1.16.3
+pandas==0.24.2
+sympy==1.4
+# modelling
+torch==1.1.0
+pytorch-pretrained-bert==0.6.2
