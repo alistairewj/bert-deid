@@ -220,6 +220,10 @@ class BertForDEID(BertForNER):
 
     def annotate(self, text, annotations=None, document_id=None, column=None,
                  **kwargs):
+
+        # sets the model to evaluation mode to fix parameters
+        self.eval()
+
         device = (torch.device("cuda")
                   if next(self.parameters()).is_cuda
                   else "cpu")

@@ -11,6 +11,9 @@ from bert_deid import model as bert_deid_model
 
 @pytest.fixture(scope="session")
 def config_radiology_reports():
+    """
+    Load configuration file for the test radiology dataset.
+    """
     # get path of conftest.py
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -30,6 +33,9 @@ def config_radiology_reports():
 
 @pytest.fixture(scope="session")
 def radiology_reports(config_radiology_reports):
+    """
+    Load the test radiology reports.
+    """
     text_path = config_radiology_reports['text_path']
 
     reports_list = os.listdir(text_path)
@@ -50,6 +56,9 @@ def radiology_reports(config_radiology_reports):
 
 @pytest.fixture(scope="session")
 def bert_i2b2_2014_model():
+    """
+    Load the model.
+    """
     return bert_deid_model.BertForDEID(
-        model_dir="models/i2b2_2014"
+        model_dir="tests/models/i2b2_2014/"
     )
