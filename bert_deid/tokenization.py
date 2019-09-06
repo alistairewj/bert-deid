@@ -25,7 +25,7 @@ import itertools
 from io import open
 
 import numpy as np
-from pytorch_pretrained_bert.file_utils import cached_path
+from pytorch_transformers.file_utils import cached_path
 
 logger = logging.getLogger(__name__)
 

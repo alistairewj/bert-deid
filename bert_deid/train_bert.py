@@ -35,7 +35,7 @@ from torch.utils.data.distributed import DistributedSampler
 from seqeval.metrics import classification_report
 from tqdm import tqdm, trange
 
-from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
+from pytorch_transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_transformers.modeling_bert import BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 
