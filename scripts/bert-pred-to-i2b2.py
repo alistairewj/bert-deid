@@ -21,7 +21,6 @@ from tqdm import tqdm
 # use i2b2 processor to get label mapping of predictions
 from bert_ner import i2b2Processor
 
-# from pytorch_pretrained_bert.tokenization import BertTokenizer
 # custom tokenizer with subword tracking
 from tokenization import BertTokenizerNER
 
