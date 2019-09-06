@@ -7,7 +7,7 @@ import csv
 import argparse
 
 from bert_deid import model, utils
-from pytorch_pretrained_bert.modeling import WEIGHTS_NAME, CONFIG_NAME
+from pytorch_transformers.modeling_bert import WEIGHTS_NAME, CONFIG_NAME
 from tqdm import tqdm
 import torch
 import pandas as pd

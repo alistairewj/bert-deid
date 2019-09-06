@@ -8,8 +8,9 @@ import pandas as pd
 import torch
 from torch.nn import CrossEntropyLoss
 
-from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.modeling import BertForTokenClassification
+from pytorch_transformers.modeling_bert import (BertConfig, WEIGHTS_NAME,
+                                                CONFIG_NAME,
+                                                BertForTokenClassification)
 
 from bert_deid.create_csv import split_by_overlap
 from bert_deid.tokenization import BertTokenizerNER
