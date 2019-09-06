@@ -20,7 +20,7 @@ from torch.utils.data import (DataLoader, SequentialSampler, TensorDataset)
 
 from tqdm import tqdm
 
-from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from pytorch_transformers.modeling_bert import BertConfig, WEIGHTS_NAME, CONFIG_NAME
 
 # custom tokenizer with subword tracking
 from bert_deid.tokenization import BertTokenizerNER

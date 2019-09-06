@@ -5,8 +5,9 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
-from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from pytorch_transformers.modeling_bert import (BertConfig, WEIGHTS_NAME,
+                                                CONFIG_NAME,
+                                                BertPreTrainedModel, BertModel)
 
 from bert_deid.create_csv import split_by_overlap, split_by_sentence, split_report_into_sections
 from bert_deid.tokenization import BertTokenizerNER
