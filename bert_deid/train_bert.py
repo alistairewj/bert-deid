@@ -37,7 +37,7 @@ from tqdm import tqdm, trange
 
 from pytorch_transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_transformers.modeling_bert import BertConfig, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
+from pytorch_transformers.optimization import AdamW, WarmupLinearSchedule
 
 # custom tokenizer with subword tracking
 from bert_deid.model import prepare_tokens, BertForNER
@@ -293,7 +293,7 @@ def main(args):
 
     processor = proc_dict[task_name]()
     label_list = processor.get_labels()
-    num_labels = len(label_list)
+    args.num_labels = len(label_list)
 
     tokenizer = BertTokenizerNER.from_pretrained(
         args.bert_model, do_lower_case=args.do_lower_case)
@@ -311,8 +311,7 @@ def main(args):
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(
         str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
     model = BertForNER.from_pretrained(args.bert_model,
-                                       cache_dir=cache_dir,
-                                       num_labels=num_labels)
+                                       cache_dir=cache_dir)
     if args.fp16:
         model.half()
     model.to(device)
@@ -367,10 +366,11 @@ def main(args):
                                              t_total=num_train_optimization_steps)
 
     else:
-        optimizer = BertAdam(optimizer_grouped_parameters,
-                             lr=args.learning_rate,
-                             warmup=args.warmup_proportion,
-                             t_total=num_train_optimization_steps)
+        optimizer = AdamW(optimizer_grouped_parameters,
+                          lr=args.learning_rate,
+                          correct_bias=False)
+                        # warmup=args.warmup_proportion,
+                        # t_total=num_train_optimization_steps)
 
     global_step = 0
     nb_tr_steps = 0
@@ -413,7 +413,8 @@ def main(args):
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 batch = tuple(t.to(device) for t in batch)
                 input_ids, input_mask, segment_ids, label_ids = batch
-                loss = model(input_ids, segment_ids, input_mask, label_ids)
+                outputs = model(input_ids, segment_ids, input_mask, label_ids)
+                loss = outputs[0]
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
@@ -454,13 +455,12 @@ def main(args):
             # Load a trained model and config that you have fine-tuned
             print(f'Loading model and configuration from {args.model_path}.')
             config = BertConfig(output_config_file)
-            model = BertForNER(config, num_labels=num_labels)
+            model = BertForNER(config)
             model.load_state_dict(torch.load(output_model_file))
         else:
             print('No trained model/config found in output_dir.')
             print('Using pretrained BERT model with random classification weights.')
-            model = BertForNER.from_pretrained(
-                args.bert_model, num_labels=num_labels)
+            model = BertForNER.from_pretrained(args.bert_model)
 
         model.to(device)
 
@@ -523,9 +523,11 @@ def main(args):
             label_ids = label_ids.to(device)
 
             with torch.no_grad():
-                tmp_eval_loss = model(
+                outputs = model(
                     input_ids, segment_ids, input_mask, label_ids)
-                logits = model(input_ids, segment_ids, input_mask)
+
+                tmp_eval_loss = outputs[0]
+                logits = tmp_eval_loss[1]
 
             logits = logits.detach().cpu().numpy()
             label_ids = label_ids.to('cpu').numpy()
