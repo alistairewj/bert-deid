@@ -104,11 +104,36 @@ class BertForNER(BertForTokenClassification):
     labels with an index of -1 in the loss function.
     """
 
-    def __init__(self, config, num_labels):
-        super(BertForNER, self).__init__(config, num_labels)
+    def __init__(self, config):
+        super(BertForNER, self).__init__(config)
 
-    def forward(self, input_ids,
-                token_type_ids=None, attention_mask=None, labels=None):
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None,
+                labels=None, position_ids=None, head_mask=None):
+        outputs = self.bert(input_ids, position_ids=position_ids,
+                            token_type_ids=token_type_ids,
+                            attention_mask=attention_mask, head_mask=head_mask)
+        sequence_output = outputs[0]
+
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        if labels is not None:
+            loss_fct = CrossEntropyLoss(ignore_index=-1)
+            # Only keep active parts of the loss
+            if attention_mask is not None:
+                active_loss = attention_mask.view(-1) == 1
+                active_logits = logits.view(-1, self.num_labels)[active_loss]
+                active_labels = labels.view(-1)[active_loss]
+                loss = loss_fct(active_logits, active_labels)
+            else:
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), scores, (hidden_states), (attentions)
+
+
+
         sequence_output, _ = self.bert(
             input_ids, token_type_ids, attention_mask,
             output_all_encoded_layers=False)
@@ -281,7 +306,8 @@ class BertForDEID(BertForNER):
             segment_ids = segment_ids.to(device)
 
         with torch.no_grad():
-            logits = self.forward(input_ids, segment_ids, input_mask)
+            outputs = self.forward(input_ids, segment_ids, input_mask)
+            logits = outputs[1]
 
         if next(self.parameters()).is_cuda:
             logits = logits.cpu().numpy()
