@@ -307,6 +307,9 @@ def main(args):
         if args.local_rank != -1:
             num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size()
 
+    # warmup_proportion = float(num_warmup_steps) / float(num_total_steps)
+    num_warmup_steps = args.warmup_proportion * num_train_optimization_steps
+
     # Prepare model
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(
         str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
@@ -361,16 +364,15 @@ def main(args):
         else:
             optimizer = FP16_Optimizer(
                 optimizer, static_loss_scale=args.loss_scale)
-
-        warmup_linear = WarmupLinearSchedule(warmup=args.warmup_proportion,
-                                             t_total=num_train_optimization_steps)
-
     else:
         optimizer = AdamW(optimizer_grouped_parameters,
                           lr=args.learning_rate,
                           correct_bias=False)
-                        # warmup=args.warmup_proportion,
-                        # t_total=num_train_optimization_steps)
+
+    scheduler = WarmupLinearSchedule(optimizer,
+                                     warmup_steps=num_warmup_steps,
+                                     t_total=num_train_optimization_steps)
+
 
     global_step = 0
     nb_tr_steps = 0
@@ -429,14 +431,8 @@ def main(args):
                 nb_tr_examples += input_ids.size(0)
                 nb_tr_steps += 1
                 if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16:
-                        # modify learning rate with special warm up BERT uses
-                        # if args.fp16 is False, BertAdam is used that handles this automatically
-                        lr_this_step = args.learning_rate * \
-                            warmup_linear.get_lr(global_step, args.warmup_proportion)
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = lr_this_step
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
                     global_step += 1
 
@@ -444,6 +440,8 @@ def main(args):
         model_to_save = model.module if hasattr(
             model, 'module') else model  # Only save the model it-self
         output_model_file = os.path.join(args.model_path, WEIGHTS_NAME)
+
+        # perhaps better to use new model.save_pretrained method here.
         torch.save(model_to_save.state_dict(), output_model_file)
         output_config_file = os.path.join(args.model_path, CONFIG_NAME)
         with open(output_config_file, 'w') as f:
