@@ -293,7 +293,7 @@ def main(args):
 
     processor = proc_dict[task_name]()
     label_list = processor.get_labels()
-    args.num_labels = len(label_list)
+    setattr(args, 'num_labels', len(label_list))
 
     tokenizer = BertTokenizerNER.from_pretrained(
         args.bert_model, do_lower_case=args.do_lower_case)
@@ -308,13 +308,14 @@ def main(args):
             num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size()
 
     # warmup_proportion = float(num_warmup_steps) / float(num_total_steps)
-    num_warmup_steps = args.warmup_proportion * num_train_optimization_steps
+    num_warmup_steps = int(round(args.warmup_proportion * num_train_optimization_steps))
 
     # Prepare model
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(
         str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
     model = BertForNER.from_pretrained(args.bert_model,
-                                       cache_dir=cache_dir)
+                                       cache_dir=cache_dir,
+                                       num_labels=args.num_labels)
     if args.fp16:
         model.half()
     model.to(device)
