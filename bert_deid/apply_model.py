@@ -142,7 +142,7 @@ def main():
     if os.path.exists(output_model_file) & os.path.exists(output_config_file):
         # Load a trained model and config that you have fine-tuned
         print(f'Loading model and configuration from {args.model_dir}.')
-        config = BertConfig(output_config_file)
+        config = BertConfig.from_json_file(output_config_file)
 
         if task_name == 'radreportlabel':
             model = BertMultiLabel(config,  num_labels=num_labels)
