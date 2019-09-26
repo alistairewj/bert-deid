@@ -192,8 +192,8 @@ class BertForDEID(BertForNER):
         config_file = os.path.join(model_dir, CONFIG_NAME)
         if os.path.exists(model_file) & os.path.exists(config_file):
             print(f'Loading model and configuration from {model_dir}.')
-            config = BertConfig(config_file)
-            super(BertForDEID, self).__init__(config, self.num_labels)
+            config = BertConfig.from_json_file(config_file)
+            super(BertForDEID, self).__init__(config)
             self.load_state_dict(torch.load(model_file, map_location="cpu"))
         else:
             raise ValueError('Folder %s did not have model and config file.',

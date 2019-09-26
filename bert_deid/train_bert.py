@@ -453,7 +453,7 @@ def main(args):
         if os.path.exists(output_model_file) & os.path.exists(output_config_file):
             # Load a trained model and config that you have fine-tuned
             print(f'Loading model and configuration from {args.model_path}.')
-            config = BertConfig(output_config_file)
+            config = BertConfig.from_json_file(output_config_file)
             model = BertForNER(config)
             model.load_state_dict(torch.load(output_model_file))
         else:

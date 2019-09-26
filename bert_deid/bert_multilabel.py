@@ -162,7 +162,7 @@ class BertForRadReportLabel(BertMultiLabel):
         config_file = os.path.join(model_dir, CONFIG_NAME)
         if os.path.exists(model_file) & os.path.exists(config_file):
             print(f'Loading model and configuration from {model_dir}.')
-            config = BertConfig(config_file)
+            config = BertConfig.from_json_file(config_file)
             super(BertForRadReportLabel, self).__init__(
                 config, self.num_labels)
             self.load_state_dict(torch.load(model_file, map_location="cpu"))
