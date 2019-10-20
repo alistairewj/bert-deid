@@ -2,14 +2,11 @@
 
 Code to fine-tune BERT on a medical note de-identification task.
 
+Install:
+
 ```
 python setup.py sdist; python -m pip install -U dist/bert_deid-0.1.tar.gz
 ```
-
-## Output deid-gs annotations to BioC XML for annotation tool
-
-`python scripts/deid_gs_to_bioc.py -p /db/git/deid-gs/dernoncourt_goldstandard/train -o /home/alistairewj/git/annotation-tool/data/dl_train`
-
 
 ## Use wrappers to generate data and train model
 
@@ -100,6 +97,12 @@ for d in `ls configs/titanx/binary`; do python scripts/create_train_tokens_file.
 for d in `ls configs/titanx/binary`; do python scripts/run_and_eval_bert.py -c configs/titanx/binary/$d; done;
 for d in `ls configs/titanx/binary`; do python scripts/eval_pred.py -c configs/titanx/binary/$d; done;
 ```
+
+
+
+## Output deid-gs annotations to BioC XML for annotation tool
+
+`python scripts/deid_gs_to_bioc.py -p /db/git/deid-gs/dernoncourt_goldstandard/train -o /home/alistairewj/git/annotation-tool/data/dl_train`
 
 
 ## Quickstart
