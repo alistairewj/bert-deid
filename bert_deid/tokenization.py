@@ -187,6 +187,7 @@ def convert_examples_to_features(
     special_tokens_count = 3 if sep_token_extra else 2
 
     features = []
+    n_obs = 0
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
@@ -210,14 +211,13 @@ def convert_examples_to_features(
                 (1 - feature_overlap) * (max_seq_length - special_tokens_count)
             )
 
-        token_iterator = range(
-            0, n_tokens, feature_len
-        )
+        token_iterator = range(0, n_tokens, feature_len)
 
         for t in token_iterator:
             tokens = ex_tokens[t:t + max_seq_length - special_tokens_count]
             offsets = ex_offsets[t:t + max_seq_length - special_tokens_count]
-            label_ids = ex_label_ids[t:t + max_seq_length - special_tokens_count]
+            label_ids = ex_label_ids[t:t + max_seq_length -
+                                     special_tokens_count]
 
             # The convention in BERT is:
             # (a) For sequence pairs:
@@ -288,7 +288,7 @@ def convert_examples_to_features(
             assert len(segment_ids) == max_seq_length
             assert len(label_ids) == max_seq_length
 
-            if ex_index < 5:
+            if n_obs < 5:
                 logger.info("*** Example ***")
                 logger.info("guid: %s", example.guid)
                 logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
@@ -313,4 +313,5 @@ def convert_examples_to_features(
                     label_ids=label_ids
                 )
             )
+            n_obs += 1
     return features
