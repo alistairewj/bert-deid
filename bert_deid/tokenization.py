@@ -165,124 +165,152 @@ def convert_examples_to_features(
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
     mask_padding_with_zero=True,
+    feature_overlap=None
 ):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
             - True (XLNet/GPT pattern): A + [SEP] + B + [SEP] + [CLS]
         `cls_token_segment_id` define the segment id associated to the CLS token (0 for BERT, 2 for XLNet)
+
+        `feature_overlap` - Split a single long example into multiple training observations. This is
+        useful for handling examples containing very long passages of text.
+            None (default): truncates each example at max_seq_length -> one InputFeature per InputExample.
+            [0, 1): controls how much overlap between consecutive segments.
+                e.g. `feature_overlap=0.1` means the last 10% of InputFeature 1 will equal first 10%
+                of InputFeature 2, assuming that the InputExample is long enough to require splitting.
     """
 
     label_map = {label: i for i, label in enumerate(label_list)}
+
+    # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
+    special_tokens_count = 3 if sep_token_extra else 2
 
     features = []
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
 
-        tokens, offsets, labels = tokenize_with_labels(
+        ex_tokens, ex_offsets, ex_labels = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
         )
 
         # assign labels based off the offsets
-        label_ids = [
+        ex_label_ids = [
             label_map[l] if l != pad_token_label_id else pad_token_label_id
-            for l in labels
+            for l in ex_labels
         ]
 
-        # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
-        special_tokens_count = 3 if sep_token_extra else 2
-        if len(tokens) > max_seq_length - special_tokens_count:
-            tokens = tokens[:(max_seq_length - special_tokens_count)]
-            offsets = offsets[:(max_seq_length - special_tokens_count)]
-            label_ids = label_ids[:(max_seq_length - special_tokens_count)]
+        n_tokens = len(ex_tokens)
+        if feature_overlap is None:
+            # we will truncate the sequence by having the iterator only have start=0
+            feature_len = n_tokens
+        else:
+            feature_len = int(
+                (1 - feature_overlap) * (max_seq_length - special_tokens_count)
+            )
 
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids:   0   0  0    0    0     0       0   0   1  1  1  1   1   1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids:   0   0   0   0  0     0   0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambiguously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        tokens += [sep_token]
-        offsets += [-1]
-        label_ids += [pad_token_label_id]
-        if sep_token_extra:
-            # roberta uses an extra separator b/w pairs of sentences
+        token_iterator = range(
+            0, n_tokens, feature_len
+        )
+
+        for t in token_iterator:
+            tokens = ex_tokens[t:t + max_seq_length - special_tokens_count]
+            offsets = ex_offsets[t:t + max_seq_length - special_tokens_count]
+            label_ids = ex_label_ids[t:t + max_seq_length - special_tokens_count]
+
+            # The convention in BERT is:
+            # (a) For sequence pairs:
+            #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+            #  type_ids:   0   0  0    0    0     0       0   0   1  1  1  1   1   1
+            # (b) For single sequences:
+            #  tokens:   [CLS] the dog is hairy . [SEP]
+            #  type_ids:   0   0   0   0  0     0   0
+            #
+            # Where "type_ids" are used to indicate whether this is the first
+            # sequence or the second sequence. The embedding vectors for `type=0` and
+            # `type=1` were learned during pre-training and are added to the wordpiece
+            # embedding vector (and position vector). This is not *strictly* necessary
+            # since the [SEP] token unambiguously separates the sequences, but it makes
+            # it easier for the model to learn the concept of sequences.
+            #
+            # For classification tasks, the first vector (corresponding to [CLS]) is
+            # used as as the "sentence vector". Note that this only makes sense because
+            # the entire model is fine-tuned.
             tokens += [sep_token]
             offsets += [-1]
             label_ids += [pad_token_label_id]
-        segment_ids = [sequence_a_segment_id] * len(tokens)
+            if sep_token_extra:
+                # roberta uses an extra separator b/w pairs of sentences
+                tokens += [sep_token]
+                offsets += [-1]
+                label_ids += [pad_token_label_id]
+            segment_ids = [sequence_a_segment_id] * len(tokens)
 
-        if cls_token_at_end:
-            tokens += [cls_token]
-            offsets += [-1]
-            label_ids += [pad_token_label_id]
-            segment_ids += [cls_token_segment_id]
-        else:
-            tokens = [cls_token] + tokens
-            offsets = [-1] + offsets
-            label_ids = [pad_token_label_id] + label_ids
-            segment_ids = [cls_token_segment_id] + segment_ids
+            if cls_token_at_end:
+                tokens += [cls_token]
+                offsets += [-1]
+                label_ids += [pad_token_label_id]
+                segment_ids += [cls_token_segment_id]
+            else:
+                tokens = [cls_token] + tokens
+                offsets = [-1] + offsets
+                label_ids = [pad_token_label_id] + label_ids
+                segment_ids = [cls_token_segment_id] + segment_ids
 
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
-        input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+            # The mask has 1 for real tokens and 0 for padding tokens. Only real
+            # tokens are attended to.
+            input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
 
-        # Zero-pad up to the sequence length.
-        padding_length = max_seq_length - len(input_ids)
-        if pad_on_left:
-            input_ids = ([pad_token] * padding_length) + input_ids
-            input_mask = (
-                [0 if mask_padding_with_zero else 1] * padding_length
-            ) + input_mask
-            segment_ids = (
-                [pad_token_segment_id] * padding_length
-            ) + segment_ids
-            label_ids = ([pad_token_label_id] * padding_length) + label_ids
-        else:
-            input_ids += [pad_token] * padding_length
-            input_mask += [0 if mask_padding_with_zero else 1] * padding_length
-            segment_ids += [pad_token_segment_id] * padding_length
-            label_ids += [pad_token_label_id] * padding_length
+            # Zero-pad up to the sequence length.
+            padding_length = max_seq_length - len(input_ids)
+            if pad_on_left:
+                input_ids = ([pad_token] * padding_length) + input_ids
+                input_mask = (
+                    [0 if mask_padding_with_zero else 1] * padding_length
+                ) + input_mask
+                segment_ids = (
+                    [pad_token_segment_id] * padding_length
+                ) + segment_ids
+                label_ids = ([pad_token_label_id] * padding_length) + label_ids
+            else:
+                input_ids += [pad_token] * padding_length
+                input_mask += [
+                    0 if mask_padding_with_zero else 1
+                ] * padding_length
+                segment_ids += [pad_token_segment_id] * padding_length
+                label_ids += [pad_token_label_id] * padding_length
 
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(segment_ids) == max_seq_length
-        assert len(label_ids) == max_seq_length
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(segment_ids) == max_seq_length
+            assert len(label_ids) == max_seq_length
 
-        if ex_index < 5:
-            logger.info("*** Example ***")
-            logger.info("guid: %s", example.guid)
-            logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
-            logger.info("input_ids: %s", " ".join([str(x) for x in input_ids]))
-            logger.info(
-                "input_mask: %s", " ".join([str(x) for x in input_mask])
+            if ex_index < 5:
+                logger.info("*** Example ***")
+                logger.info("guid: %s", example.guid)
+                logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
+                logger.info(
+                    "input_ids: %s", " ".join([str(x) for x in input_ids])
+                )
+                logger.info(
+                    "input_mask: %s", " ".join([str(x) for x in input_mask])
+                )
+                logger.info(
+                    "segment_ids: %s", " ".join([str(x) for x in segment_ids])
+                )
+                logger.info(
+                    "label_ids: %s", " ".join([str(x) for x in label_ids])
+                )
+
+            features.append(
+                InputFeatures(
+                    input_ids=input_ids,
+                    input_mask=input_mask,
+                    segment_ids=segment_ids,
+                    label_ids=label_ids
+                )
             )
-            logger.info(
-                "segment_ids: %s", " ".join([str(x) for x in segment_ids])
-            )
-            logger.info("label_ids: %s", " ".join([str(x) for x in label_ids]))
-
-        features.append(
-            InputFeatures(
-                input_ids=input_ids,
-                input_mask=input_mask,
-                segment_ids=segment_ids,
-                label_ids=label_ids
-            )
-        )
     return features
