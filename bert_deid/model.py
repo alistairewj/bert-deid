@@ -137,7 +137,7 @@ class BertForNER(BertForTokenClassification):
 
         # outputs  # (loss), scores, (hidden_states), (attentions)
 
-        return logits
+        return outputs
 
 
 class BertForDEID(BertForNER):
@@ -291,6 +291,8 @@ class BertForDEID(BertForNER):
 
         with torch.no_grad():
             logits = self.forward(input_ids, segment_ids, input_mask)
+            # remove from one element tuple
+            logits = logits[0]
 
         if next(self.parameters()).is_cuda:
             logits = logits.cpu().numpy()
