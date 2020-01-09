@@ -35,7 +35,14 @@ logger = logging.getLogger(__name__)
 class InputFeatures(object):
     """Features are directly input to the transformer model."""
     def __init__(
-        self, input_ids, input_mask, segment_ids, label_ids, input_offsets=None
+        self,
+        input_ids,
+        input_mask,
+        segment_ids,
+        label_ids,
+        input_subwords=None,
+        input_offsets=None,
+        input_lengths=None
     ):
         self.input_ids = input_ids
         self.input_mask = input_mask
@@ -43,7 +50,9 @@ class InputFeatures(object):
         self.label_ids = label_ids
 
         # offsets are used in evaluation to match predictions with text
+        self.input_subwords = input_subwords
         self.input_offsets = input_offsets
+        self.input_lengths = input_lengths
 
 
 def pattern_spans(text, pattern):
@@ -98,6 +107,8 @@ def tokenize_with_labels(
 
     # now reverse engineer the locations of the tokens
     offsets = []
+    lengths = []
+
     # also output a flag indicating if the token is a subword
     token_sw = []
     w = 0
@@ -119,10 +130,10 @@ def tokenize_with_labels(
 
         # ignore the ##s added by the tokenizer
         if token.startswith('##'):
-            subword = 1
+            subword = True
             token = token[2:]
         else:
-            subword = 0
+            subword = False
 
         # end if we have reached the end of the text
         if (i + len(token)) > len(text):
@@ -131,8 +142,9 @@ def tokenize_with_labels(
         # if the token is identical to the text, store the offset
         if text[i:i + len(token)] == token:
             offsets.append(i)
+            lengths.append(len(token))
             token_sw.append(subword)
-            
+
             w += 1
             i += len(token)
             continue
@@ -141,14 +153,17 @@ def tokenize_with_labels(
 
     assert len(token_sw) == len(word_tokens)
     assert len(offsets) == len(word_tokens)
+    assert len(lengths) == len(word_tokens)
 
     # initialize token labels as the default label
     # set subword tokens to padded token
-    token_labels = [pad_token_label_id if sw else default_label for sw in token_sw]
+    token_labels = [
+        pad_token_label_id if sw else default_label for sw in token_sw
+    ]
 
     # when building examples for model evaluation, there are no labels
     if example.labels is None:
-        return word_tokens, offsets, token_labels
+        return word_tokens, token_labels, token_sw, offsets, lengths
 
     w = 0
     for label, start, offset in example.labels:
@@ -169,11 +184,13 @@ def tokenize_with_labels(
 
             # assign all tokens between [start, stop] to this label
             # *except* if it is a padding token (so the model ignores subwords)
-            new_labels = [label if not token_sw[k] else pad_token_label_id
-                          for k in range(i, j)]
+            new_labels = [
+                label if not token_sw[k] else pad_token_label_id
+                for k in range(i, j)
+            ]
             token_labels[i:j] = new_labels
 
-    return word_tokens, offsets, token_labels
+    return word_tokens, token_labels, token_sw, offsets, lengths
 
 
 def convert_examples_to_features(
@@ -219,7 +236,7 @@ def convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
 
-        ex_tokens, ex_offsets, ex_labels = tokenize_with_labels(
+        ex_tokens, ex_labels, ex_token_sw, ex_offsets, ex_lengths = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
         )
 
@@ -243,6 +260,8 @@ def convert_examples_to_features(
         for t in token_iterator:
             tokens = ex_tokens[t:t + max_seq_length - special_tokens_count]
             offsets = ex_offsets[t:t + max_seq_length - special_tokens_count]
+            lengths = ex_lengths[t:t + max_seq_length - special_tokens_count]
+            token_sw = ex_token_sw[t:t + max_seq_length - special_tokens_count]
             label_ids = ex_label_ids[t:t + max_seq_length -
                                      special_tokens_count]
 
@@ -266,22 +285,30 @@ def convert_examples_to_features(
             # the entire model is fine-tuned.
             tokens += [sep_token]
             offsets += [-1]
+            lengths += [-1]
+            token_sw += [False]
             label_ids += [pad_token_label_id]
             if sep_token_extra:
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
                 offsets += [-1]
+                lengths += [-1]
+                token_sw += [-1]
                 label_ids += [pad_token_label_id]
             segment_ids = [sequence_a_segment_id] * len(tokens)
 
             if cls_token_at_end:
                 tokens += [cls_token]
                 offsets += [-1]
+                lengths += [-1]
+                token_sw += [False]
                 label_ids += [pad_token_label_id]
                 segment_ids += [cls_token_segment_id]
             else:
                 tokens = [cls_token] + tokens
                 offsets = [-1] + offsets
+                lengths = [-1] + lengths
+                token_sw = [False] + token_sw
                 label_ids = [pad_token_label_id] + label_ids
                 segment_ids = [cls_token_segment_id] + segment_ids
 
@@ -303,6 +330,8 @@ def convert_examples_to_features(
                 ) + segment_ids
                 label_ids = ([pad_token_label_id] * padding_length) + label_ids
                 offsets = ([-1] * padding_length) + offsets
+                lengths = ([-1] * padding_length) + lengths
+                token_sw = ([False] * padding_length) + token_sw
             else:
                 input_ids += [pad_token] * padding_length
                 input_mask += [
@@ -311,17 +340,24 @@ def convert_examples_to_features(
                 segment_ids += [pad_token_segment_id] * padding_length
                 label_ids += [pad_token_label_id] * padding_length
                 offsets += [-1] * padding_length
+                lengths += [-1] * padding_length
+                token_sw += [False] * padding_length
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
             assert len(label_ids) == max_seq_length
             assert len(offsets) == max_seq_length
+            assert len(lengths) == max_seq_length
+            assert len(token_sw) == max_seq_length
 
             if n_obs < 5:
                 logger.info("*** Example ***")
                 logger.info("guid: %s", example.guid)
                 logger.info("tokens: %s", " ".join([str(x) for x in tokens]))
+                logger.info(
+                    "subwords: %s", " ".join([str(x)[0] for x in token_sw])
+                )
                 logger.info(
                     "input_ids: %s", " ".join([str(x) for x in input_ids])
                 )
@@ -342,7 +378,9 @@ def convert_examples_to_features(
                     input_mask=input_mask,
                     segment_ids=segment_ids,
                     label_ids=label_ids,
-                    input_offsets=offsets
+                    input_offsets=offsets,
+                    input_lengths=lengths,
+                    input_subwords=token_sw
                 )
             )
             n_obs += 1
