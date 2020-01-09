@@ -34,11 +34,16 @@ logger = logging.getLogger(__name__)
 
 class InputFeatures(object):
     """Features are directly input to the transformer model."""
-    def __init__(self, input_ids, input_mask, segment_ids, label_ids):
+    def __init__(
+        self, input_ids, input_mask, segment_ids, label_ids, input_offsets=None
+    ):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
         self.label_ids = label_ids
+
+        # offsets are used in evaluation to match predictions with text
+        self.input_offsets = input_offsets
 
 
 def pattern_spans(text, pattern):
@@ -93,6 +98,8 @@ def tokenize_with_labels(
 
     # now reverse engineer the locations of the tokens
     offsets = []
+    # also output a flag indicating if the token is a subword
+    token_sw = []
     w = 0
     i = 0
 
@@ -112,7 +119,10 @@ def tokenize_with_labels(
 
         # ignore the ##s added by the tokenizer
         if token.startswith('##'):
+            subword = 1
             token = token[2:]
+        else:
+            subword = 0
 
         # end if we have reached the end of the text
         if (i + len(token)) > len(text):
@@ -121,14 +131,20 @@ def tokenize_with_labels(
         # if the token is identical to the text, store the offset
         if text[i:i + len(token)] == token:
             offsets.append(i)
+            token_sw.append(subword)
+            
             w += 1
             i += len(token)
             continue
 
         i += 1
 
+    assert len(token_sw) == len(word_tokens)
+    assert len(offsets) == len(word_tokens)
+
     # initialize token labels as the default label
-    token_labels = [default_label] * len(word_tokens)
+    # set subword tokens to padded token
+    token_labels = [pad_token_label_id if sw else default_label for sw in token_sw]
 
     # when building examples for model evaluation, there are no labels
     if example.labels is None:
@@ -145,11 +161,17 @@ def tokenize_with_labels(
             # we have labeled a token at the end of the text
             # also catches the case that we label a part of a token
             # at the end of the text, but not the entire token
-            token_labels[-1] = label
+            if not token_sw[-1]:
+                token_labels[-1] = label
         else:
-            # assign all tokens between [start, stop] to this label
+            # find the last token which is within this label
             j = bisect_left(offsets, stop)
-            token_labels[i:j] = [label] * (j - i)
+
+            # assign all tokens between [start, stop] to this label
+            # *except* if it is a padding token (so the model ignores subwords)
+            new_labels = [label if not token_sw[k] else pad_token_label_id
+                          for k in range(i, j)]
+            token_labels[i:j] = new_labels
 
     return word_tokens, offsets, token_labels
 
@@ -280,6 +302,7 @@ def convert_examples_to_features(
                     [pad_token_segment_id] * padding_length
                 ) + segment_ids
                 label_ids = ([pad_token_label_id] * padding_length) + label_ids
+                offsets = ([-1] * padding_length) + offsets
             else:
                 input_ids += [pad_token] * padding_length
                 input_mask += [
@@ -287,11 +310,13 @@ def convert_examples_to_features(
                 ] * padding_length
                 segment_ids += [pad_token_segment_id] * padding_length
                 label_ids += [pad_token_label_id] * padding_length
+                offsets += [-1] * padding_length
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
             assert len(label_ids) == max_seq_length
+            assert len(offsets) == max_seq_length
 
             if n_obs < 5:
                 logger.info("*** Example ***")
@@ -309,13 +334,15 @@ def convert_examples_to_features(
                 logger.info(
                     "label_ids: %s", " ".join([str(x) for x in label_ids])
                 )
+                logger.info("offsets: %s", " ".join([str(x) for x in offsets]))
 
             features.append(
                 InputFeatures(
                     input_ids=input_ids,
                     input_mask=input_mask,
                     segment_ids=segment_ids,
-                    label_ids=label_ids
+                    label_ids=label_ids,
+                    input_offsets=offsets
                 )
             )
             n_obs += 1
