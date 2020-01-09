@@ -7,8 +7,6 @@ model_path = '/data/models/bert-i2b2-2014'
 transformer = Transformer(
     model_type,
     model_path,
-    token_step_size=100,
-    sequence_length=100,
     max_seq_length=128,
     task_name='i2b2_2014',
     cache_dir=None,
