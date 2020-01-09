@@ -1,167 +1,88 @@
 """Class for applying BERT-deid on text."""
 import os
 import re
+from hashlib import sha256
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+from seqeval.metrics import f1_score, precision_score, recall_score
 
 import torch
 from torch.nn import CrossEntropyLoss
+from torch.utils.data import (
+    DataLoader, RandomSampler, SequentialSampler, TensorDataset
+)
 
-from pytorch_transformers.modeling_bert import (BertConfig, WEIGHTS_NAME,
-                                                CONFIG_NAME,
-                                                BertForTokenClassification)
+from transformers import (
+    WEIGHTS_NAME,
+    AdamW,
+    BertConfig,
+    BertForTokenClassification,
+    BertTokenizer,
+    CamembertConfig,
+    CamembertForTokenClassification,
+    CamembertTokenizer,
+    DistilBertConfig,
+    DistilBertForTokenClassification,
+    DistilBertTokenizer,
+    RobertaConfig,
+    RobertaForTokenClassification,
+    RobertaTokenizer,
+    XLMRobertaConfig,
+    XLMRobertaForTokenClassification,
+    XLMRobertaTokenizer,
+    get_linear_schedule_with_warmup,
+)
 
-from bert_deid.create_csv import split_by_overlap
-from bert_deid.tokenization import BertTokenizerNER
-import bert_deid.processors as processors
+MODEL_CLASSES = {
+    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
+    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
+    "distilbert":
+        (
+            DistilBertConfig, DistilBertForTokenClassification,
+            DistilBertTokenizer
+        ),
+    "camembert":
+        (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
+    "xlmroberta":
+        (
+            XLMRobertaConfig, XLMRobertaForTokenClassification,
+            XLMRobertaTokenizer
+        ),
+}
 
-
-def segment_ids(self, segment1_len, segment2_len):
-    ids = [0] * segment1_len + [1] * segment2_len
-    return torch.tensor([ids]).to(device=self.device)
-
-
-def prepare_tokens(tokens, tokens_sw, tokens_idx, label,
-                   label_list, max_seq_length, tokenizer):
-
-    label_map = {label: i for i, label in enumerate(label_list)}
-
-    segment_ids = [0] * len(tokens)
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-    # example.label is a list of start/stop offsets for tagged entities
-    # use this to create list of labels for each token
-    # assumes labels are ordered
-    labels = ['O'] * len(input_ids)
-    if len(label) > 0:
-        l_idx = 0
-        start, stop, entity = label[l_idx]
-        for i, idx in enumerate(tokens_idx):
-            if idx[0] >= stop:
-                l_idx += 1
-                # exit loop if we have finished assigning labels
-                if l_idx >= len(label):
-                    break
-                start, stop, entity = label[l_idx]
-
-            if (idx[0] >= start) & (idx[0] < stop):
-                # tokens are assigned based on label of first character
-                labels[i] = entity
-
-    # convert from text labels to integer coding
-    # if a label is not in the map, we ignore that token in backprop
-    labels[0] = "[CLS]"
-    labels[-1] = "[SEP]"
-    label_ids = [label_map[x]
-                 if x in label_map
-                 else -1
-                 for x in labels]
-
-    # set labels for subwords to -1 to ignore them in label loss
-    label_ids = [-1 if tokens_sw[i] == 1
-                 else label_id
-                 for i, label_id in enumerate(label_ids)]
-
-    # The mask has 1 for real tokens and 0 for padding tokens.
-    input_mask = [1] * len(input_ids)
-
-    # Zero-pad up to the sequence length.
-    padding = [0] * (max_seq_length - len(input_ids))
-    input_ids += padding
-    input_mask += padding
-    segment_ids += padding
-    label_ids += padding
-
-    assert len(input_ids) == max_seq_length
-    assert len(input_mask) == max_seq_length
-    assert len(segment_ids) == max_seq_length
-    assert len(label_ids) == max_seq_length
-
-    return input_ids, input_mask, segment_ids, label_ids
+from bert_deid import tokenization, processors
+PROCESSORS = processors.PROCESSORS
 
 
-def _truncate_seq_pair(tokens_a, tokens_b, max_length):
-    """Truncates a sequence pair in place to the maximum length."""
+class Transformer(object):
+    """Wrapper for a Transformer model to be applied for NER."""
+    def __init__(
+        self,
+        model_type,
+        model_path,
+        token_step_size=100,
+        sequence_length=100,
+        max_seq_length=128,
+        task_name='i2b2_2014',
+        cache_dir=None,
+        device='cpu'
+    ):
 
-    # This is a simple heuristic which will always truncate the longer sequence
-    # one token at a time. This makes more sense than truncating an equal percent
-    # of tokens from each, since if one sequence is very short then each token
-    # that's truncated likely contains more information than a longer sequence.
-    while True:
-        total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            tokens_b.pop()
+        if task_name not in PROCESSORS:
+            raise ValueError(
+                f'Unrecognized task: {task_name}. Choices: {PROCESSORS.keys()}'
+            )
 
-
-class BertForNER(BertForTokenClassification):
-    """BERT model for neural entity recognition.
-    Essentially identical to BertForTokenClassification, but ignores
-    labels with an index of -1 in the loss function.
-    """
-
-    def __init__(self, config):
-        super(BertForNER, self).__init__(config)
-
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None,
-                labels=None, position_ids=None, head_mask=None):
-
-        outputs = self.bert(input_ids,
-                            attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
-                            position_ids=position_ids,
-                            head_mask=head_mask)
-
-        sequence_output = outputs[0]
-
-        sequence_output = self.dropout(sequence_output)
-
-        logits = self.classifier(sequence_output)
-
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-1)
-            # Only keep active parts of the loss
-            if attention_mask is not None:
-                active_loss = attention_mask.view(-1) == 1
-                active_logits = logits.view(-1, self.num_labels)[active_loss]
-                active_labels = labels.view(-1)[active_loss]
-                loss = loss_fct(active_logits, active_labels)
-            else:
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
-
-        # outputs  # (loss), scores, (hidden_states), (attentions)
-
-        return outputs
-
-
-class BertForDEID(BertForNER):
-    """BERT model for deidentification."""
-
-    def __init__(self, model_dir,
-                 token_step_size=100,
-                 sequence_length=100,
-                 max_seq_length=128,
-                 task_name='i2b2'):
-
-        # use the associated data processor to define label set
-        proc_dict = {
-            "conll": processors.CoNLLProcessor,
-            "hipaa": processors.hipaaDeidProcessor,
-            "binary": processors.binaryDeidProcessor,
-            "i2b2": processors.i2b2DeidProcessor
-        }
-        if task_name not in proc_dict:
-            raise ValueError('Unrecognized task: %s', task_name)
-
-        self.labels = proc_dict[task_name]().get_labels()
+        # TODO: try to get labels from the transformer model itself
+        self.labels = PROCESSORS[task_name]('/tmp').get_labels()
         self.num_labels = len(self.labels)
         self.label_id_map = {i: label for i, label in enumerate(self.labels)}
+
+        # Use cross entropy ignore index as padding label id so
+        # that only real label ids contribute to the loss later
+        self.pad_token_label_id = CrossEntropyLoss().ignore_index
 
         # by default, we do non-overlapping segments of text
         self.token_step_size = token_step_size
@@ -171,209 +92,238 @@ class BertForDEID(BertForNER):
         # max seq length should always be >= sequence_length + 2
         self.max_seq_length = max_seq_length
 
-        # load trained config/weights
-        model_file = os.path.join(model_dir, WEIGHTS_NAME)
-        config_file = os.path.join(model_dir, CONFIG_NAME)
-        if os.path.exists(model_file) & os.path.exists(config_file):
-            print(f'Loading model and configuration from {model_dir}.')
-            config = BertConfig.from_json_file(config_file)
-            super(BertForDEID, self).__init__(config)
-            self.load_state_dict(torch.load(model_file, map_location="cpu"))
-        else:
-            raise ValueError('Folder %s did not have model and config file.',
-                             model_dir)
+        # get the definition classes for the model
+        self.model_type = model_type.lower()
+        config_class, model_class, tokenizer_class = MODEL_CLASSES[
+            self.model_type]
 
-        if config.num_hidden_layers == 12:
-            self.bert_model = 'bert-base'
-        else:
-            # num_hidden_layers == 24
-            self.bert_model = 'bert-large'
+        # initialize the model
+        self.config = config_class.from_pretrained(
+            #args.config_name if args.config_name else args.model_name_or_path,
+            model_path,
+            num_labels=self.num_labels,
+            cache_dir=cache_dir if cache_dir else None,
+        )
 
-        if config.vocab_size == 28996:
-            self.bert_model += '-cased'
+        # determine if we are using an uncased vocabulary
+        #FIXME: not sure this works for xlm/roberta etc
+        if self.config.vocab_size == 28996:
             self.do_lower_case = False
         else:
             # vocab_size == 30522
-            self.bert_model += '-uncased'
             self.do_lower_case = True
 
-        # initialize tokenizer
-        self.tokenizer = BertTokenizerNER.from_pretrained(
-            self.bert_model, do_lower_case=self.do_lower_case)
+        self.tokenizer = tokenizer_class.from_pretrained(
+            #args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+            model_path,
+            do_lower_case=self.do_lower_case,
+            cache_dir=cache_dir if cache_dir else None,
+        )
+        self.model = model_class.from_pretrained(
+            #args.model_name_or_path,
+            model_path,
+            from_tf=bool(".ckpt" in model_path),
+            config=self.config,
+            cache_dir=cache_dir if cache_dir else None,
+        )
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
-        device = torch.device("cpu")
-        self.to(device)
+        self.device = torch.device(device)
+        self.model.to(self.device)
 
-        # for post-fixes
+    def split_by_overlap(self, text, token_step_size=20, sequence_length=100):
+        # track offsets in tokenization
+        tokens, tokens_sw, tokens_idx = self.tokenizer.tokenize_with_index(text)
 
-        # lower case obvious false positives
-        self.fp_words = set(['swan-ganz', 'swan ganz',
-                             'carina', 'dobbhoff', 'shiley',
-                             'hcc', 'kerley', 'technologist'])
+        if len(tokens_idx) == 0:
+            # no tokens found, return empty list
+            return []
+        # get start index of each token
+        tokens_start = [x[0] for x in tokens_idx]
+        tokens_start = np.array(tokens_start)
 
-    def _prepare_tokens(self, tokens, tokens_sw, tokens_idx):
-        segment_ids = [0] * len(tokens)
-        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        # forward fill index for first token over its subsequent subword tokens
+        # this means that if we try to split on a subword token, we will actually
+        # split on the starting word
+        mask = np.array(tokens_sw) == 1
+        idx = np.where(~mask, np.arange(mask.shape[0]), 0)
+        np.maximum.accumulate(idx, axis=0, out=idx)
+        tokens_start[mask] = tokens_start[idx[mask]]
 
-        # The mask has 1 for real tokens and 0 for padding tokens.
-        input_mask = [1] * len(input_ids)
+        if len(tokens) <= sequence_length:
+            # very short text - only create one example
+            seq_offsets = [[tokens_start[0], len(text)]]
+        else:
+            seq_offsets = range(
+                0,
+                len(tokens) - sequence_length, token_step_size
+            )
+            last_offset = seq_offsets[-1] + token_step_size
+            seq_offsets = [
+                [tokens_start[x], tokens_start[x + sequence_length]]
+                for x in seq_offsets
+            ]
 
-        # Zero-pad up to the sequence length.
-        padding = [0] * (self.max_seq_length - len(input_ids))
-        input_ids += padding
-        input_mask += padding
-        segment_ids += padding
+            # last example always goes to the end of the text
+            seq_offsets.append([tokens_start[last_offset], len(text)])
 
-        return input_ids, input_mask, segment_ids
+        # turn our offsets into examples
+        # create a list of lists, each sub-list has 4 elements:
+        #   sentence number, start index, end index, text of the sentence
+        examples = list()
 
-    def annotate(self, text, annotations=None, document_id=None, column=None,
-                 **kwargs):
+        for i, (start, stop) in enumerate(seq_offsets):
+            examples.append([i, start, stop, text[start:stop]])
 
+        return examples
+
+    def predict(self, text, batch_size=8):
+        # args, model, tokenizer, processor, pad_token_label_id, mode="test"
         # sets the model to evaluation mode to fix parameters
-        self.eval()
-
-        device = (torch.device("cuda")
-                  if next(self.parameters()).is_cuda
-                  else "cpu")
+        self.model.eval()
 
         # annotate a string of text
         # split the text into examples
         # we choose non-overlapping examples for evaluation
-        examples = split_by_overlap(
-            text, self.tokenizer,
-            token_step_size=self.token_step_size,
-            sequence_length=self.sequence_length
+        # examples = split_by_overlap(
+        #    text,
+        #    self.tokenizer,
+        #    token_step_size=self.token_step_size,
+        #    sequence_length=self.sequence_length
+        #)
+
+        # in this case we have a length 1 example
+        # we use the SHA-256 hash of the text as the globally unique identifier
+        guid = sha256(text.encode()).hexdigest()
+        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
+        features = tokenization.convert_examples_to_features(
+            examples,
+            self.labels,
+            self.max_seq_length,
+            self.tokenizer,
+            cls_token_at_end=bool(self.model_type in ["xlnet"]),
+            # xlnet has a cls token at the end
+            cls_token=self.tokenizer.cls_token,
+            cls_token_segment_id=2 if self.model_type in ["xlnet"] else 0,
+            sep_token=self.tokenizer.sep_token,
+            sep_token_extra=bool(self.model_type in ["roberta"]),
+            # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
+            pad_on_left=bool(self.model_type in ["xlnet"]),
+            # pad on the left for xlnet
+            pad_token=self.tokenizer.convert_tokens_to_ids(
+                [self.tokenizer.pad_token]
+            )[0],
+            pad_token_segment_id=4 if self.model_type in ["xlnet"] else 0,
+            pad_token_label_id=self.pad_token_label_id,
+            feature_overlap=0
         )
 
-        anns = list()
+        # Convert to Tensors and build dataset
+        all_input_ids = torch.tensor(
+            [f.input_ids for f in features], dtype=torch.long
+        )
+        all_input_mask = torch.tensor(
+            [f.input_mask for f in features], dtype=torch.long
+        )
+        all_segment_ids = torch.tensor(
+            [f.segment_ids for f in features], dtype=torch.long
+        )
+        all_label_ids = torch.tensor(
+            [f.label_ids for f in features], dtype=torch.long
+        )
 
-        # examples is a list of lists, each sub-list has 4 elements:
-        #   sentence number, start index, end index, text of the sentence
+        eval_dataset = TensorDataset(
+            all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+        )
+        eval_sampler = SequentialSampler(eval_dataset)
+        eval_dataloader = DataLoader(
+            eval_dataset, sampler=eval_sampler, batch_size=batch_size
+        )
 
-        # convert examples into tokens/input ids to run through the model
-        ex_tokens, ex_tokens_sw, ex_tokens_idx = [], [], []
-        last_token_idx = []
-        input_ids, input_mask, segment_ids = [], [], []
-        for e, example in enumerate(examples):
-            # track offsets in tokenization
-            tokens, tokens_sw, tokens_idx = self.tokenizer.tokenize_with_index(
-                example[3])
+        logits = None
+        out_label_ids = None
+        # eval_loss = 0.0
 
-            # retain original tokens
-            ex_tokens.append(tokens)
-            ex_tokens_sw.append(tokens_sw)
-            ex_tokens_idx.append(tokens_idx)
-            last_token_idx.append(len(tokens))
+        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+            batch = tuple(t.to(self.device) for t in batch)
 
-            # add stop chars etc for inputs
-            tokens = ["[CLS]"] + tokens + ["[SEP]"]
-            tokens_sw = [0] + tokens_sw + [0]
-            tokens_idx = [[-1]] + tokens_idx + [[-1]]
+            with torch.no_grad():
+                inputs = {
+                    "input_ids": batch[0],
+                    "attention_mask": batch[1],
+                    "labels": batch[3]
+                }
+                if self.model_type != "distilbert":
+                    inputs["token_type_ids"] = (
+                        batch[2]
+                        if self.model_type in ["bert", "xlnet"] else None
+                    )  # XLM and RoBERTa don"t use segment_ids
+                outputs = self.model(**inputs)
+                _, batch_logits = outputs[:2]
 
-            input_ids_e, input_mask_e, segment_ids_e = self._prepare_tokens(
-                tokens, tokens_sw, tokens_idx
-            )
-            input_ids.append(input_ids_e)
-            input_mask.append(input_mask_e)
-            segment_ids.append(segment_ids_e)
+                # eval_loss += tmp_eval_loss.item()
 
-        # with the IDs prepared, run through model for predictions
-        input_ids = torch.tensor(input_ids, dtype=torch.long)
-        input_mask = torch.tensor(input_mask, dtype=torch.long)
-        segment_ids = torch.tensor(segment_ids, dtype=torch.long)
+            # extract output predictions (logits) as a numpy array
+            # N_BATCHES x N_SEQ_LENGTH x N_LABELS
+            if logits is None:
+                logits = batch_logits.detach().cpu().numpy()
+                out_label_ids = inputs["labels"].detach().cpu().numpy()
+            else:
+                logits = np.append(
+                    logits, batch_logits.detach().cpu().numpy(), axis=0
+                )
+                out_label_ids = np.append(
+                    out_label_ids,
+                    inputs["labels"].detach().cpu().numpy(),
+                    axis=0
+                )
 
-        if next(self.parameters()).is_cuda:
-            input_ids = input_ids.to(device)
-            input_mask = input_mask.to(device)
-            segment_ids = segment_ids.to(device)
-
-        with torch.no_grad():
-            logits = self.forward(input_ids, segment_ids, input_mask)
-            # remove from one element tuple
-            logits = logits[0]
-
-        if next(self.parameters()).is_cuda:
-            logits = logits.cpu().numpy()
-
-        for e, example in enumerate(examples):
-            tokens = ex_tokens[e]
-            tokens_sw = ex_tokens_sw[e]
-            tokens_idx = ex_tokens_idx[e]
-            tokens_offset = example[1]
-
-            if len(tokens) == 0:
-                # no data for predictions
-                continue
-
-            # get logits as list
-            scores = logits[e, :, :]
-            pred = np.argmax(scores, axis=-1).tolist()
-            scores = scores.tolist()
-
-            # remove [CLS]/[SEP] chars
-            scores = scores[1:]
-            pred = pred[1:]
-
-            scores = scores[:last_token_idx[e]]
-            pred = pred[:last_token_idx[e]]
-
-            # the model does not make predictions for sub-words
-            # the first word-part for a segmented sub-word is used as the prediction
-            # so we append sub-word indices to previous non-subword indices
-            k = 0
-            while k < len(tokens_sw):
-                if tokens_sw[k] == 1:
-                    # pop these indices
-                    current_idx = tokens_idx.pop(k)
-                    # add sub-word index to previous non-subword
-                    tokens_idx[k-1].extend(current_idx)
-
-                    token_add = tokens.pop(k)
-                    tokens[k-1] = tokens[k-1] + token_add[2:]
-                    # remove the token from other lists
-                    scores.pop(k)
-                    pred.pop(k)
-                    tokens_sw.pop(k)
-                else:
-                    k += 1
-
-            for k in range(len(pred)):
-
-                # note we offset it to the document using tokens_offset
-                start = tokens_idx[k][0] + tokens_offset
-                stop = tokens_idx[k][-1] + tokens_offset + 1
-
-                if self.label_id_map[pred[k]] == 'O':
-                    continue
-
-                # if we are here, we have a prediction
-                # add this to the output
-                row = [
-                    # document_id,annotation_id,annotator
-                    document_id, f'bert.{e}.{k}', self.bert_model,
-                    # start,stop
-                    start, stop,
-                    # entity
-                    tokens[k],
-                    # entity_type (prediction)
-                    self.label_id_map[pred[k]],
-                    # comment
-                    None,
-                    # confidence - the score assigned by bert
-                    scores[k][pred[k]]
+        # re-align the predictions with the original text
+        preds, offsets, lengths = [], [], []
+        for f, feature in enumerate(features):
+            _, idxKeep = np.where(out_label_ids != -100)
+            # get predictions for only the kept labels
+            preds.append(logits[f, idxKeep, :])
+            # get offsets for only the kept labels
+            offsets.extend(
+                [
+                    x
+                    for i, x in enumerate(feature.input_offsets) if i in idxKeep
                 ]
-                anns.append(row)
+            )
 
-        df = pd.DataFrame(anns, columns=['document_id', 'annotation_id',
-                                         'annotator', 'start', 'stop',
-                                         'entity', 'entity_type',
-                                         'comment', 'confidence'])
-        df['start'] = df['start'].astype(int)
-        df['stop'] = df['stop'].astype(int)
+            # increment the lengths for the first token in words tokenized into subwords
+            feature_lengths = feature.input_lengths
+            for i in reversed(range(len(feature.input_subwords))):
+                if feature.input_subwords[i]:
+                    # cumulatively sums lengths for subwords until the first subword token
+                    feature_lengths[i - 1] += feature_lengths[i]
 
-        return df
+            lengths.extend(
+                [x for i, x in enumerate(feature_lengths) if i in idxKeep]
+            )
+
+        preds = np.concatenate(preds, axis=0)
+
+        # now, we may have multiple predictions for the same offset token
+        # this can happen as we are overlapping observations to maximize
+        # context for tokens near the window edges
+        # so we take the *last* prediction, because that prediction will have
+        # the most context
+
+        # np.unique returns index of first unique value, so reverse the list
+        offsets.reverse()
+        _, unique_idx = np.unique(offsets, return_index=True)
+        unique_idx = len(offsets) - unique_idx - 1
+        offsets.reverse()
+
+        # align the predictions with the text offsets
+        offsets = [x for i, x in enumerate(offsets) if i in unique_idx]
+        lengths = [x for i, x in enumerate(lengths) if i in unique_idx]
+        preds = preds[unique_idx, :]
+
+        return preds, lengths, offsets
 
     def pool_annotations(self, df):
         # pool token-wise annotations together
@@ -383,8 +333,8 @@ class BertForDEID(BertForNER):
             return df
 
         # get location of maximally confident annotations
-        df_keep = df.groupby(['annotator', 'start', 'stop'])[
-            ['confidence']].max()
+        df_keep = df.groupby(['annotator', 'start',
+                              'stop'])[['confidence']].max()
 
         df_keep.reset_index(inplace=True)
 
@@ -396,32 +346,3 @@ class BertForDEID(BertForNER):
         df.drop_duplicates(subset=grp_cols, keep='first', inplace=True)
 
         return df
-
-    def postfix(self, df, text):
-        """Post-hoc corrections using rules.
-        Designed using radiology reports."""
-        idxKeep = list()
-        for i, row in df.iterrows():
-            if row['entity'].lower() in self.fp_words:
-                continue
-
-            if 'swan' in row['entity'].lower():
-                if text[row['start']:row['start']+9].lower() in self.fp_words:
-                    continue
-
-            if row['entity_type'].lower() == 'age':
-                # remove 'M' or 'F' from entities
-                if (len(row['entity']) == 3) & (row['entity'][-1].lower() in ('m', 'f')):
-                    df.loc[i, 'stop'] -= 1
-                    df.loc[i, 'entity'] = df.loc[i, 'entity'][0:-1]
-            elif row['entity_type'].lower() == 'date':
-                # remove dates which are from bulleted lists
-                if re.search(r'\n [0-9][.)] ', text[row['start']-2:row['stop']+2]):
-                    continue
-            elif row['entity_type'].lower() == 'location':
-                if row['entity'].lower() in ['ge', 'hickman', 'carina']:
-                    continue
-
-            idxKeep.append(i)
-
-        return df.loc[idxKeep, :]
