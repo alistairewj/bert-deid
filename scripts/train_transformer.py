@@ -56,14 +56,7 @@ from transformers import (
 )
 from bert_deid import processors, tokenization
 
-PROCESSORS = {
-    'conll': processors.CoNLLProcessor,
-    'i2b2_2006': processors.i2b22006Processor,
-    'i2b2_2014': processors.i2b22014Processor,
-    'physionet': processors.PhysioNetProcessor,
-    'dernoncourt_lee': processors.DernoncourtLeeProcessor,
-    'rr': processors.RRProcessor
-}
+PROCESSORS = processors.PROCESSORS
 
 try:
     from torch.utils.tensorboard import SummaryWriter

@@ -361,3 +361,13 @@ class RRProcessor(DeidProcessor):
             # contacts
             'CONTACT'
         )
+
+
+PROCESSORS = {
+    'conll': CoNLLProcessor,
+    'i2b2_2006': i2b22006Processor,
+    'i2b2_2014': i2b22014Processor,
+    'physionet': PhysioNetProcessor,
+    'dernoncourt_lee': DernoncourtLeeProcessor,
+    'rr': RRProcessor
+}
