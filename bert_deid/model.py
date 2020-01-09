@@ -35,6 +35,8 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
+from bert_deid import tokenization, processors
+
 MODEL_CLASSES = {
     "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
     "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
@@ -52,8 +54,29 @@ MODEL_CLASSES = {
         ),
 }
 
-from bert_deid import tokenization, processors
 PROCESSORS = processors.PROCESSORS
+
+def pool_annotations(df):
+    # pool token-wise annotations together
+    # this is necessary if overlapping examples are used
+    # i.e. self.token_step_size < self.sequence_length
+    if df.shape[0] == 0:
+        return df
+
+    # get location of maximally confident annotations
+    df_keep = df.groupby(['annotator', 'start',
+                            'stop'])[['confidence']].max()
+
+    df_keep.reset_index(inplace=True)
+
+    # merge on these columns to remove rows with low confidence
+    grp_cols = list(df_keep.columns)
+    df = df.merge(df_keep, how='inner', on=grp_cols)
+
+    # if two rows had identical confidence, keep the first
+    df.drop_duplicates(subset=grp_cols, keep='first', inplace=True)
+
+    return df
 
 
 class Transformer(object):
@@ -62,8 +85,8 @@ class Transformer(object):
         self,
         model_type,
         model_path,
-        token_step_size=100,
-        sequence_length=100,
+        # token_step_size=100,
+        # sequence_length=100,
         max_seq_length=128,
         task_name='i2b2_2014',
         cache_dir=None,
@@ -85,9 +108,10 @@ class Transformer(object):
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
 
         # by default, we do non-overlapping segments of text
-        self.token_step_size = token_step_size
+        # self.token_step_size = token_step_size
         # sequence_length is how long each example for the model is
-        self.sequence_length = sequence_length
+        # self.sequence_length = sequence_length
+
         # max seq length is what we pad the model to
         # max seq length should always be >= sequence_length + 2
         self.max_seq_length = max_seq_length
@@ -324,25 +348,3 @@ class Transformer(object):
         preds = preds[unique_idx, :]
 
         return preds, lengths, offsets
-
-    def pool_annotations(self, df):
-        # pool token-wise annotations together
-        # this is necessary if overlapping examples are used
-        # i.e. self.token_step_size < self.sequence_length
-        if df.shape[0] == 0:
-            return df
-
-        # get location of maximally confident annotations
-        df_keep = df.groupby(['annotator', 'start',
-                              'stop'])[['confidence']].max()
-
-        df_keep.reset_index(inplace=True)
-
-        # merge on these columns to remove rows with low confidence
-        grp_cols = list(df_keep.columns)
-        df = df.merge(df_keep, how='inner', on=grp_cols)
-
-        # if two rows had identical confidence, keep the first
-        df.drop_duplicates(subset=grp_cols, keep='first', inplace=True)
-
-        return df
