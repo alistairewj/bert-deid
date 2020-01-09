@@ -129,6 +129,11 @@ def tokenize_with_labels(
 
     # initialize token labels as the default label
     token_labels = [default_label] * len(word_tokens)
+
+    # when building examples for model evaluation, there are no labels
+    if example.labels is None:
+        return word_tokens, offsets, token_labels
+
     w = 0
     for label, start, offset in example.labels:
         stop = start + offset
