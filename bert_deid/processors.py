@@ -15,6 +15,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def load_labels(fn):
+    """Loads annotations from a CSV file with entity_type/start/stop columns."""
+    with open(fn, 'r') as fp:
+        csvreader = csv.reader(fp, delimiter=',', quotechar='"')
+        header = next(csvreader)
+        # identify which columns we want
+        idx = [
+            header.index('entity_type'),
+            header.index('start'),
+            header.index('stop')
+        ]
+
+        # iterate through the CSV and load in the labels as a list of tuples
+        #  (label name, start index, length of entity)
+        # e.g. labels = [('DATE', 36, 5), ('AGE', 45, 2)]
+        labels = [
+            (
+                row[idx[0]], int(row[idx[1]]),
+                int(row[idx[2]]) - int(row[idx[1]])
+            ) for row in csvreader
+        ]
+    
+    return labels
+
+
 class InputExample(object):
     """A single training/test example."""
     def __init__(self, guid, text, labels=None):
@@ -191,25 +216,8 @@ class DeidProcessor(DataProcessor):
                 text = ''.join(fp.readlines())
 
             # load in the annotations
-            with open(os.path.join(ann_path, f'{f[:-4]}.gs'), 'r') as fp:
-                csvreader = csv.reader(fp, delimiter=',', quotechar='"')
-                header = next(csvreader)
-                # identify which columns we want
-                idx = [
-                    header.index('entity_type'),
-                    header.index('start'),
-                    header.index('stop')
-                ]
-
-                # iterate through the CSV and load in the labels as a list of tuples
-                #  (label name, start index, length of entity)
-                # e.g. labels = [('DATE', 36, 5), ('AGE', 45, 2)]
-                labels = [
-                    (
-                        row[idx[0]], int(row[idx[1]]),
-                        int(row[idx[2]]) - int(row[idx[1]])
-                    ) for row in csvreader
-                ]
+            fn = os.path.join(ann_path, f'{f[:-4]}.gs')
+            labels = load_labels(fn)
 
             examples.append(InputExample(guid=guid, text=text, labels=labels))
 
