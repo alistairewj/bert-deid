@@ -17,6 +17,7 @@ from torch.utils.data import (
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
+    AlbertConfig, AlbertTokenizer,
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
@@ -35,9 +36,12 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
+# custom class written for albert token classification
+from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
 
 MODEL_CLASSES = {
+    "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
     "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
     "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
     "distilbert":
