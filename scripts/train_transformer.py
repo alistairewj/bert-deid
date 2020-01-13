@@ -37,6 +37,7 @@ from tqdm import tqdm, trange
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
+    AlbertConfig, AlbertTokenizer,
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
@@ -54,6 +55,8 @@ from transformers import (
     XLMRobertaTokenizer,
     get_linear_schedule_with_warmup,
 )
+# custom class written for albert token classification
+from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
 
 PROCESSORS = processors.PROCESSORS
@@ -76,6 +79,7 @@ ALL_MODELS = sum(
 )
 
 MODEL_CLASSES = {
+    "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
     "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
     "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
     "distilbert":
