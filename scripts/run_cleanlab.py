@@ -105,6 +105,11 @@ if __name__ == '__main__':
     # Now getting label errors is trivial with cleanlab... its one line of code.
     # Label errors are ordered by likelihood of being an error. First index is most likely error.
 
+    if pred.shape[0] > 100000:
+        print('Large predictions take a long time. Only using top 100,000.')
+        pred = pred[:100000, :]
+        labels = labels[:100000]
+
     ordered_label_errors = pruning.get_noise_indices(
         s=labels,
         psx=preds,
@@ -125,8 +130,10 @@ if __name__ == '__main__':
         UNDERLINE = '\033[4m'
 
     n = 0
+    n_skipped = 0
     for i in ordered_label_errors:
         start, stop = offsets[i], offsets[i] + lengths[i]
+
         y = label_map[labels[i]]
         yhat = label_map[np.argmax(preds[i])]
 
@@ -134,6 +141,11 @@ if __name__ == '__main__':
         with open(text_path / files[i], 'r') as fp:
             text = ''.join(fp.readlines())
 
+        # not interested in printing the punctuation ones
+        if (stop - start) == 1:
+            if text[start:stop] in ('.', ',', ':', ')', '()'):
+                n_skipped += 1
+                continue
         text = text.replace('\n', ' ')
         print(text[max(start - 30, 0):start], end='')
         print(bcolors.FAIL, end='')
@@ -145,3 +157,5 @@ if __name__ == '__main__':
 
         if n > 100:
             break
+
+    print(f'===\nSkipped {n_skipped} punctuation mismatches.')
