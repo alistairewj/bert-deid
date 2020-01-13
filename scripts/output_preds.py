@@ -1,3 +1,4 @@
+import csv
 import os
 import pickle
 from pathlib import Path
@@ -13,60 +14,154 @@ from tqdm import tqdm
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
 
-# load in a trained model
-model_type = 'bert'  # -base-uncased'
-model_path = '/enc_data/models/bert-i2b2-2014'
-transformer = Transformer(
-    model_type,
-    model_path,
-    max_seq_length=128,
-    task_name='i2b2_2014',
-    cache_dir=None,
-    device='cpu'
-)
-label_to_id = {v: k for k, v in transformer.label_id_map.items()}
+import argparse
 
-data_path = Path('/enc_data/deid-gs/i2b2_2014/test')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
 
-files = os.listdir(data_path / 'txt')
-files = [f for f in files if f.endswith('.txt')]
-data = []
+    # Required parameters
+    parser.add_argument(
+        "--data_dir",
+        default='/enc_data/deid-gs/i2b2_2014/test',
+        type=str,
+        required=True,
+        help="The input data dir.",
+    )
+    parser.add_argument(
+        "--model_dir",
+        default='/enc_data/models/bert-i2b2-2014',
+        type=str,
+        help="Path to the model.",
+    )
+    parser.add_argument(
+        "--model_type", default='bert', type=str, help="Type of model"
+    )
+    parser.add_argument(
+        "--task",
+        default='i2b2_2014',
+        type=str,
+        help="Type of dataset",
+    )
+    parser.add_argument(
+        "--output",
+        default='preds.pkl',
+        type=str,
+        help="Output file",
+    )
+    parser.add_argument(
+        "--output_folder",
+        default=None,
+        type=str,
+        help="Output folder for CSV stand-off annotations.",
+    )
+    args = parser.parse_args()
 
-preds = None
-lengths = []
-offsets = []
-labels = []
+    # load in a trained model
+    transformer = Transformer(
+        args.model_type,
+        args.model_dir,
+        max_seq_length=128,
+        task_name=args.task,
+        cache_dir=None,
+        device='cpu'
+    )
+    label_to_id = {v: k for k, v in transformer.label_id_map.items()}
 
-for f in tqdm(files, total=len(files), desc='Files'):
-    with open(data_path / 'txt' / f, 'r') as fp:
-        text = ''.join(fp.readlines())
+    data_path = Path(args.data_dir)
 
-    ex_preds, ex_lengths, ex_offsets = transformer.predict(text)
-
-    if preds is None:
-        preds = ex_preds
+    if args.output_folder is not None:
+        output_folder = Path(args.output_folder)
+        if not output_folder.exists():
+            output_folder.mkdir(parents=True)
+        output_header = [
+            'document_id', 'annotation_id', 'start', 'stop', 'entity',
+            'entity_type', 'comment'
+        ]
     else:
-        preds = np.append(preds, ex_preds, axis=0)
+        output_folder = None
 
-    lengths.append(ex_lengths)
-    offsets.append(ex_offsets)
+    files = os.listdir(data_path / 'txt')
+    files = [f for f in files if f.endswith('.txt')]
+    data = []
 
-    # load in gold standard
-    gs_fn = data_path / 'ann' / f'{f[:-4]}.gs'
-    gs = load_labels(gs_fn)
+    preds = None
+    lengths = []
+    offsets = []
+    labels = []
+    # HACK: map physionet -> i2b2_2014
+    pn_to_i2b2 = {
+        'O': 'O',
+        # names
+        'HCPNAME': 'DOCTOR',
+        'RELATIVEPROXYNAME': 'PATIENT',
+        'PTNAME': 'PATIENT',
+        'PTNAMEINITIAL': 'PATIENT',
+        # professions
+        # locations
+        'LOCATION': 'LOCATION',
+        # ages
+        'AGE': 'AGE',
+        # dates
+        'DATE': 'DATE',
+        'DATEYEAR': 'DATE',
+        # IDs
+        'OTHER': 'IDNUM',
+        # contacts
+        'PHONE': 'PHONE'
+    }
 
-    # convert labels to align with preds
-    gs = sorted(gs, key=lambda x: x[1])
-    label_tokens = ['O'] * len(ex_offsets)
+    for f in tqdm(files, total=len(files), desc='Files'):
+        with open(data_path / 'txt' / f, 'r') as fp:
+            text = ''.join(fp.readlines())
 
-    for i, g in enumerate(gs):
-        idxStart = bisect_left(ex_offsets, g[1])
-        idxStop = bisect_right(ex_offsets, g[1] + g[2])
-        label_tokens[idxStart:idxStop] = [g[0]] * (idxStop - idxStart)
+        ex_preds, ex_lengths, ex_offsets = transformer.predict(text)
 
-    # convert label tokens to label_ids
-    label_tokens = [label_to_id[l] for l in label_tokens]
-    labels.extend(label_tokens)
+        if preds is None:
+            preds = ex_preds
+        else:
+            preds = np.append(preds, ex_preds, axis=0)
 
-with open('preds.pkl', 'wb') as fp:
-    pickle.dump([files, preds, labels, lengths, offsets], fp)
+        if output_folder is not None:
+            # output the data to this folder as .pred files
+            with open(output_folder / f'{f[:-4]}.pred', 'w') as fp:
+                csvwriter = csv.writer(fp)
+                # header
+                csvwriter.writerow(output_header)
+
+                for i in range(ex_preds.shape[0]):
+                    start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
+                    entity = text[start:stop]
+                    entity_type = transformer.label_id_map[np.argmax(
+                        ex_preds[i, :]
+                    )]
+                    # do not save object entity types
+                    if entity_type == 'O':
+                        continue
+                    row = [
+                        f[:-4],
+                        str(i + 1), start, stop, entity, entity_type, None
+                    ]
+                    csvwriter.writerow(row)
+        lengths.append(ex_lengths)
+        offsets.append(ex_offsets)
+
+        # load in gold standard
+        gs_fn = data_path / 'ann' / f'{f[:-4]}.gs'
+        gs = load_labels(gs_fn)
+
+        # convert labels to align with preds
+        gs = sorted(gs, key=lambda x: x[1])
+        label_tokens = ['O'] * len(ex_offsets)
+
+        for i, g in enumerate(gs):
+            idxStart = bisect_left(ex_offsets, g[1])
+            idxStop = bisect_right(ex_offsets, g[1] + g[2])
+            label_tokens[idxStart:idxStop] = [g[0]] * (idxStop - idxStart)
+
+        # convert label tokens to label_ids
+        # label_tokens = [label_to_id[pn_to_i2b2[l.upper()]] for l in label_tokens]
+        label_tokens = [label_to_id[l.upper()] for l in label_tokens]
+        labels.extend(label_tokens)
+
+    with open(args.output, 'wb') as fp:
+        pickle.dump([files, preds, labels, lengths, offsets], fp)
