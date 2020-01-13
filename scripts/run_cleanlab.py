@@ -105,9 +105,9 @@ if __name__ == '__main__':
     # Now getting label errors is trivial with cleanlab... its one line of code.
     # Label errors are ordered by likelihood of being an error. First index is most likely error.
 
-    if pred.shape[0] > 100000:
+    if preds.shape[0] > 100000:
         print('Large predictions take a long time. Only using top 100,000.')
-        pred = pred[:100000, :]
+        preds = preds[:100000, :]
         labels = labels[:100000]
 
     ordered_label_errors = pruning.get_noise_indices(
