@@ -22,7 +22,9 @@ import logging
 import os
 import unicodedata
 import itertools
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
+
+import numpy as np
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -88,22 +90,57 @@ def split_by_pattern(text, pattern):
     return tokens_with_spans
 
 
+def print_tokens_with_text(text, tokens, offsets, lengths):
+    for i, token in enumerate(tokens):
+        start, stop = offsets[i], offsets[i] + lengths[i]
+        print('{:10s} {:10s}'.format(token, text[start:stop]))
+
+
 def tokenize_with_labels(
     tokenizer, example, pad_token_label_id=-100, default_label='O'
 ):
     text = example.text
-    if '##' in text:
-        logger.warning('Text contains hashes. Offset code may break.')
-        i = text.index("##")
-        start, stop = min(i - 10, i), max(i + 10, len(text))
-        logger.warning(f'bad text: {text[start:stop]}')
+
+    # determine the type of tokenizer
+    tokenizer_type = tokenizer.__class__.__name__
+
+    if tokenizer_type in ('BertTokenizer', 'DistilBertTokenizer'):
+        # bert/distilbert add two hashes before sub-words
+        special_characters = '##'
+    elif tokenizer_type in (
+        'XLMRobertaTokenizer', 'CamembertTokenizer', 'AlbertTokenizer'
+    ):
+        # more recent tokenizers add a special chars where a whitespace prefixed a word
+        # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
+        special_characters = b'\xe2\x96\x81'.decode('utf-8')
+    else:
+        raise ValueError(f'Unrecognized tokenizer {tokenizer_type}')
 
     word_tokens = tokenizer.tokenize(text)
 
-    if hasattr(tokenizer, 'basic_tokenizer'):
-        if hasattr(tokenizer.basic_tokenizer, 'do_lower_case'):
-            if tokenizer.basic_tokenizer.do_lower_case:
-                text = text.lower()
+    if tokenizer_type == 'AlbertTokenizer':
+        # check for text that has been preprocessed
+        correction_chars = {"''": '"', "``": '"'}
+    else:
+        correction_chars = {}
+
+    offset_corrections = []
+    for char_orig, char_replaced in correction_chars.items():
+        while char_orig in text:
+            # make a note that we must increase offsets for subsequent tokens
+            offset_corrections.append(
+                [text.index(char_orig),
+                 len(char_orig) - len(char_replaced)]
+            )
+            i = text.index(char_orig)
+            # replace only the first instance
+            text = text.replace(char_orig, char_replaced, 1)
+
+    # make sure we lower case the text if the tokens are lower cased
+    # necessary for aligning text with tokens
+    do_lower_case = tokenizer.tokenize('A')[0]
+    if 'a' in do_lower_case:
+        text = text.lower()
 
     # now reverse engineer the locations of the tokens
     offsets = []
@@ -128,18 +165,24 @@ def tokenize_with_labels(
                 'Unable to get offsets for tokens due to unknown tokens.'
             )
 
-        # ignore the ##s added by the tokenizer
-        if token.startswith('##'):
-            subword = True
-            token = token[2:]
+        # ignore the special characters added by the tokenizer
+        if token.startswith(special_characters):
+            token = token[len(special_characters):]
+            if special_characters == '##':
+                subword = True
+            else:
+                subword = False
         else:
-            subword = False
+            if special_characters == '##':
+                subword = False
+            else:
+                subword = True
 
         # end if we have reached the end of the text
         if (i + len(token)) > len(text):
             break
 
-        # if the token is identical to the text, store the offset
+        # check if this token matches the original text
         if text[i:i + len(token)] == token:
             offsets.append(i)
             lengths.append(len(token))
@@ -150,6 +193,23 @@ def tokenize_with_labels(
             continue
 
         i += 1
+
+    offsets = np.asarray(offsets)
+    lengths = np.asarray(lengths)
+
+    # now look back at the text and update as appropriate
+    n = 0
+    for token_start, token_len in offset_corrections:
+        i = bisect_left(offsets, token_start + n)
+        offsets[i + 1:] += token_len
+        lengths[i] += token_len
+        # the offsets were shifted by the text replace
+        # need to keep track of cumulative shift
+        n += token_len
+
+    # back to list
+    offsets = offsets.tolist()
+    lengths = lengths.tolist()
 
     assert len(token_sw) == len(word_tokens)
     assert len(offsets) == len(word_tokens)
