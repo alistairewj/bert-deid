@@ -74,3 +74,23 @@ def test_albert_tokenizer():
     assert token_labels[24] == -100
     assert token_labels[25] == 'D'
     assert token_labels[26] == -100
+
+
+def test_bert_tokenizer_on_hashes():
+    """Ensure that two hashes in text does not break the offset/subword code."""
+    text = "Sleep apnea. ## Parkinson's Diease. ##STOP THIS."
+    do_lower_case = True
+    tokenizer = BertTokenizer.from_pretrained(
+        'bert-base-uncased', do_lower_case=do_lower_case
+    )
+
+    example = InputExample('1', text, labels=None)
+
+    tokens, token_labels, token_sw, offsets, lengths = tokenize_with_labels(
+        tokenizer, example, pad_token_label_id=-100
+    )
+
+    assert tokens[12] == '#'
+    assert tokens[13] == '#'
+    assert not token_sw[12]
+    assert not token_sw[13]
