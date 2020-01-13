@@ -306,7 +306,7 @@ class Transformer(object):
         # re-align the predictions with the original text
         preds, offsets, lengths = [], [], []
         for f, feature in enumerate(features):
-            _, idxKeep = np.where(out_label_ids != -100)
+            idxKeep = np.where(out_label_ids[f, :] != -100)[0]
             # get predictions for only the kept labels
             preds.append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
