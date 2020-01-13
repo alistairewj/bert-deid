@@ -137,7 +137,6 @@ if __name__ == '__main__':
         y = label_map[labels[i]]
         yhat = label_map[np.argmax(preds[i])]
 
-        print(f'{files[i]}. Given: {y}. Guess: {yhat}.', end=' ')
         with open(text_path / files[i], 'r') as fp:
             text = ''.join(fp.readlines())
 
@@ -146,6 +145,8 @@ if __name__ == '__main__':
             if text[start:stop] in ('.', ',', ':', ')', '()'):
                 n_skipped += 1
                 continue
+
+        print(f'{files[i]}. Given: {y}. Guess: {yhat}.', end=' ')
         text = text.replace('\n', ' ')
         print(text[max(start - 30, 0):start], end='')
         print(bcolors.FAIL, end='')
