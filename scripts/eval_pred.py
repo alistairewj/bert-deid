@@ -1,10 +1,12 @@
 from __future__ import absolute_import, division, print_function
 
 import json
+from collections import OrderedDict
 import os
 import re
 import logging
 import argparse
+from pathlib import Path
 
 from bert_deid import utils
 from tqdm import tqdm
@@ -18,161 +20,107 @@ Evaluates the output using gold standard annotations.
 Optionally outputs mismatches to brat standoff format.
 """
 
-
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 
 def main():
     parser = argparse.ArgumentParser()
 
-    # Required parameters
-    parser.add_argument('-c', "--config",
-                        default=None,
-                        type=str,
-                        help=("Configuration file (json)."
-                              "Specifies folders and parameters."))
+    parser.add_argument(
+        "--pred_path", required=True, type=str, help="Path for model labels."
+    )
+    parser.add_argument(
+        "--text_path",
+        required=True,
+        type=str,
+        help="Path for de-identified text."
+    )
+    parser.add_argument(
+        "--ref_path",
+        required=True,
+        type=str,
+        help=(
+            "The input ref folder with labels"
+            " for text files to be deidentified."
+        )
+    )
+    parser.add_argument(
+        "--pred_extension",
+        default='pred',
+        type=str,
+        help=("Extension for predictions labels"
+              " (default: pred)")
+    )
+    parser.add_argument(
+        "--ref_extension",
+        default='gs',
+        type=str,
+        help=(
+            "Extension for gold standard files in"
+            " ref folder (default: gs)"
+        )
+    )
+    parser.add_argument(
+        '--log',
+        type=str,
+        default=None,
+        help='text file to output false negatives to'
+    )
 
-    # If config is not provided, each argument can be given as an input
-    parser.add_argument("--model_path",
-                        default=None,
-                        type=str,
-                        help="The directory with model weights/config files.")
-
-    parser.add_argument("--text_path",
-                        default=None,
-                        type=str,
-                        help=("The input data folder with individual"
-                              " files to be deidentified."))
-    parser.add_argument("--text_extension",
-                        default='txt',
-                        type=str,
-                        help=("Extension for input files in input folder "
-                              "(default: txt)"))
-
-    # gold standard params
-    parser.add_argument("--ref_path",
-                        default=None,
-                        type=str,
-                        help=("The input ref folder with labels"
-                              " for text files to be deidentified."))
-    parser.add_argument("--ref_extension",
-                        default='gs',
-                        type=str,
-                        help=("Extension for gold standard files in"
-                              " ref folder (default: gs)"))
-
-    parser.add_argument("--pred_orig_path",
-                        default=None,
-                        type=str,
-                        help="Path to output unsimplified model labels.")
-    parser.add_argument("--pred_path",
-                        default=None,
-                        type=str,
-                        help="Path to output simplified model labels.")
-    parser.add_argument("--pred_extension",
-                        default='bert',
-                        type=str,
-                        help=("Extension for output labels"
-                              " (default: bert)"))
-
-    parser.add_argument('-b', '--brat_path', type=str,
-                        default=None,
-                        help='folder to output brat annotations')
-
-    parser.add_argument('--csv_path', type=str,
-                        default=None,
-                        help='folder to output errors for labeling')
-
-    # parameters of the model/deid
-    parser.add_argument("--task_name",
-                        default='i2b2',
-                        type=str,
-                        choices=['i2b2', 'hipaa'],
-                        help=("The name of the task to train. "
-                              "Primarily defines the label set."))
-
-    parser.add_argument('-m', '--method', type=str,
-                        default='sentence',
-                        choices=['sentence', 'overlap'],
-                        help=('method for splitting text into'
-                              ' individual examples.'))
-    parser.add_argument('--step-size', type=int,
-                        default=20,
-                        help='if method="overlap", the token step size to use.')
-    parser.add_argument('--sequence-length', type=int,
-                        default=100,
-                        help='if method="overlap", the max number of tokens per ex.')
-    # Other parameters
-    parser.add_argument("--no_cuda",
-                        action='store_true',
-                        help="Whether not to use CUDA when available")
+    parser.add_argument(
+        '--csv_path',
+        type=str,
+        default=None,
+        help='CSV file to output errors for labeling'
+    )
 
     args = parser.parse_args()
 
-    # if config file is used, we ignore args and use config file/defaults
-    # TODO: allow using environment variables?
-
-    # prepare a dict with values from argparse (incl defaults)
-    argparse_dict = vars(args)
-    if args.config is not None:
-        # if config provided, update dict with values from config
-        with open(args.config, 'r') as fp:
-            config = json.load(fp)
-
-        argparse_dict.update(config)
-
-    # if pred_orig_path exists, we are outputting non-simplified annot
-    # if neither exist, warn the user that we are not saving ann to files
-    if argparse_dict['pred_path'] is None:
-        raise ValueError('Prediction path required to evaluate predictions.')
-
-    model_path = argparse_dict['model_path']
-    tr = os.path.join(model_path, 'training_set_tokens.csv')
-    if not os.path.exists(tr):
-        raise ValueError(
-            ('training_set_tokens.csv file required in %s\n'
-             'create with create_train_tokens_file.py'), model_path)
-
-    # load vocab
-    tr = pd.read_csv(tr, index_col=0)
-    # create a set for all train vocab allowing for quick comparisons
-    tr_tokens = set(tr.index)
-    # we will exclude certain characters from this unique check
-    stopchar_rem = re.compile(r'[,.;_\\\/?!@#$%^&*()-]')
+    ref_path = Path(args.ref_path)
+    pred_path = Path(args.pred_path)
 
     csv_path = None
-    if argparse_dict['csv_path'] is not None:
-        csv_path = argparse_dict['csv_path']
-        if not os.path.exists(csv_path):
-            os.makedirs(csv_path)
+    if args.csv_path is not None:
+        csv_path = Path(args.csv_path)
+        if not os.path.exists(csv_path.parents[0]):
+            os.makedirs(csv_path.parents[0])
 
-    # ensure extension vars have the dot prefix
-    for c in argparse_dict.keys():
-        if c.endswith('_extension'):
-            if argparse_dict[c][0] != '.':
-                argparse_dict[c] = '.' + argparse_dict[c]
+    log_path = None
+    if args.log is not None:
+        log_path = Path(args.log)
+        if not os.path.exists(log_path.parents[0]):
+            os.makedirs(log_path.parents[0])
 
-    input_ext = argparse_dict['text_extension']
-    gs_ext = argparse_dict['ref_extension']
-    pred_ext = argparse_dict['pred_extension']
+        log_text = OrderedDict(
+            [['False Negatives', ''], ['False Positives', '']]
+        )
+
+    input_ext = '.txt'
+    gs_ext = args.ref_extension
+    if not gs_ext.startswith('.'):
+        gs_ext = '.' + gs_ext
+    pred_ext = args.pred_extension
+    if not pred_ext.startswith('.'):
+        pred_ext = '.' + pred_ext
 
     # read files from folder
-    if os.path.exists(argparse_dict['text_path']):
-        input_path = argparse_dict['text_path']
+    if os.path.exists(args.text_path):
+        input_path = Path(args.text_path)
         files = os.listdir(input_path)
 
         # remove extension and get file list
-        input_files = set([f[0:-len(input_ext)]
-                           for f in files
-                           if f.endswith(input_ext)])
+        input_files = set(
+            [f[0:-len(input_ext)] for f in files if f.endswith(input_ext)]
+        )
 
-        input_files = list(input_files)
+        input_files = sorted(list(input_files))
     else:
-        raise ValueError('Input folder %s does not exist.',
-                         argparse_dict['text_path'])
+        raise ValueError('Input folder %s does not exist.', args.text_path)
 
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(input_files))
@@ -183,19 +131,26 @@ def main():
     # keep track of all PHI tokens in this dataset
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
-        with open(os.path.join(input_path, f'{fn}{input_ext}'), 'r') as fp:
+        with open(input_path / f'{fn}{input_ext}', 'r') as fp:
             text = ''.join(fp.readlines())
 
         # load output of bert-deid
-        fn_pred = f'{fn}{pred_ext}'
-        df = pd.read_csv(os.path.join(argparse_dict['pred_path'], fn_pred),
-                         header=0)
+        fn_pred = pred_path / f'{fn}{pred_ext}'
+        df = pd.read_csv(
+            fn_pred, header=0, dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
 
         # load ground truth
-        gs_fn = os.path.join(argparse_dict['ref_path'], f'{fn}{gs_ext}')
-        gs = pd.read_csv(gs_fn, header=0,
-                         dtype={'entity': str,
-                                'entity_type': str})
+        gs_fn = ref_path / f'{fn}{gs_ext}'
+        gs = pd.read_csv(
+            gs_fn, header=0, dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
 
         # fix entities - lower case and group
         gs = utils.combine_entity_types(gs, lowercase=True)
@@ -219,21 +174,12 @@ def main():
 
         # report performance token wise
         tokens, tokens_y, tokens_ypred = [], [], []
-        # keep track of whether a token was in the training set vocab
-        tokens_in_tr = list()
 
         pattern = re.compile(r'\s')
         n_tokens = 0
-        n_tokens_in_tr = 0
         for token, start, end in utils.pattern_spans(text, pattern):
             token_tar = False
             token_pred = False
-            token_in_tr = stopchar_rem.sub('', token)
-            # if it's only stop chars, it's not a unique token
-            if len(token_in_tr) == 0:
-                token_in_tr = True
-            else:
-                token_in_tr = token_in_tr in tr_tokens
 
             # if any of the individual characters are flagged
             # .. then we consider the whole token to be flagged
@@ -247,16 +193,12 @@ def main():
                 tokens.append([token, start, end])
                 tokens_y.append(token_tar)
                 tokens_ypred.append(token_pred)
-                tokens_in_tr.append(token_in_tr)
 
             n_tokens += 1
-            n_tokens_in_tr += token_in_tr
 
         # now we have a list of tokens with preds, calculate some stats
         tokens_y = np.asarray(tokens_y, dtype=bool)
         tokens_ypred = np.asarray(tokens_ypred, dtype=bool)
-        # invert tokens_in_tr to get index of tokens unique to test
-        tokens_uniq = ~np.asarray(tokens_in_tr, dtype=bool)
 
         curr_performance['n_token'] = n_tokens
         curr_performance['n_token_phi'] = sum(tokens_y)
@@ -264,23 +206,50 @@ def main():
         curr_performance['n_token_fp'] = sum(~tokens_y & tokens_ypred)
         curr_performance['n_token_fn'] = sum(tokens_y & ~tokens_ypred)
 
-        # same performance, factoring in uniqueness of token
-        curr_performance['n_token_uniq'] = n_tokens - n_tokens_in_tr
-        curr_performance['n_token_uniq_phi'] = sum(tokens_uniq & tokens_y)
-        curr_performance['n_token_uniq_tp'] = sum(
-            tokens_uniq & tokens_y & tokens_ypred)
-        curr_performance['n_token_uniq_fp'] = sum(
-            tokens_uniq & ~tokens_y & tokens_ypred)
-        curr_performance['n_token_uniq_fn'] = sum(
-            tokens_uniq & tokens_y & ~tokens_ypred)
+        if (log_path is not None) & (
+            (curr_performance['n_token_fp'] > 0) |
+            (curr_performance['n_token_fn'] > 0)
+        ):
+            # print out the false negatives
+            indices = OrderedDict(
+                [
+                    ['False Negatives',
+                     np.where(tokens_y & ~tokens_ypred)[0]],
+                    ['False Positives',
+                     np.where(~tokens_y & tokens_ypred)[0]],
+                ]
+            )
+            for k, idx in indices.items():
+                for i in idx:
+                    start, stop = tokens[i][1:3]
+                    log_text[k] += f'{fn},'
+                    log_text[k] += text[max(start -
+                                            50, 0):start].replace('\n', ' ')
+                    entity = text[start:stop]
+                    log_text[k] += "**" + entity.replace('\n', ' ') + "**"
+                    log_text[k] += text[stop:min(stop + 50, len(text))].replace(
+                        '\n', ' '
+                    )
+                    log_text[k] += '\n'
+                    # write the entry that should be added to the gold-standard
+                    if (',' in entity) or ('\n' in entity) or ('"' in entity):
+                        entity = '"' + entity.replace('"', '""') + '"'
+
+                    log_text[k] += f'{fn},,{start},{stop},{entity},,\n'
 
         perf_all[fn] = curr_performance
-        fn_all.extend([x[0]
-                       for i, x in enumerate(tokens)
-                       if tokens_y[i] & ~tokens_ypred[i]])
-        fp_all.extend([x[0]
-                       for i, x in enumerate(tokens)
-                       if ~tokens_y[i] & tokens_ypred[i]])
+        fn_all.extend(
+            [
+                x[0]
+                for i, x in enumerate(tokens) if tokens_y[i] & ~tokens_ypred[i]
+            ]
+        )
+        fp_all.extend(
+            [
+                x[0]
+                for i, x in enumerate(tokens) if ~tokens_y[i] & tokens_ypred[i]
+            ]
+        )
 
     # convert to dataframe
     df = pd.DataFrame.from_dict(perf_all, orient='index')
@@ -290,8 +259,31 @@ def main():
     print('\nFalse positives:\n"{}"'.format('","'.join(fp_all)))
     print('\n')
 
+    # summary stats
+    se = df['n_token_tp'] / (df['n_token_tp'] + df['n_token_fn'])
+    ppv = df['n_token_tp'] / (df['n_token_tp'] + df['n_token_fp'])
+    f1 = 2 * se * ppv / (se + ppv)
+    print(f'Macro Se: {se.mean():0.3f}')
+    print(f'Macro P+: {ppv.mean():0.3f}')
+    print(f'Macro F1: {f1.mean():0.3f}')
+
+    se = df['n_token_tp'].sum(
+    ) / (df['n_token_tp'].sum() + df['n_token_fn'].sum())
+    ppv = df['n_token_tp'].sum(
+    ) / (df['n_token_tp'].sum() + df['n_token_fp'].sum())
+    f1 = 2 * se * ppv / (se + ppv)
+    print(f'Micro Se: {se.mean():0.3f}')
+    print(f'Micro P+: {ppv.mean():0.3f}')
+    print(f'Micro F1: {f1.mean():0.3f}')
+
+    if log_path is not None:
+        # overwrite the log file
+        with open(log_path, 'w') as fp:
+            for k, text in log_text.items():
+                fp.write(f'=== {k} ===\n{text}\n\n')
+
     if csv_path is not None:
-        df.to_csv(os.path.join(csv_path, 'performance.csv'))
+        df.to_csv(csv_path)
 
 
 if __name__ == "__main__":
