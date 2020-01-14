@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
         # not interested in printing the punctuation ones
         if (stop - start) == 1:
-            if text[start:stop] in ('.', ',', ':', ')', '()'):
+            if text[start:stop] in ('.', ',', ':', ')', '()', '-', '/', "'"):
                 n_skipped += 1
                 continue
 
