@@ -8,7 +8,7 @@ import logging
 import numpy as np
 from transformers import BertTokenizer
 from bert_deid.model import Transformer
-from bert_deid.processors import load_labels
+from bert_deid.processors import load_labels, label_transform
 from tqdm import tqdm
 
 logger = logging.getLogger()
@@ -54,6 +54,10 @@ if __name__ == '__main__':
         type=str,
         help="Output folder for CSV stand-off annotations.",
     )
+    parser.add_argument(
+        "--label_transform", action="store_true",
+        help="Whether labels are transformed using BIO"
+    )
     args = parser.parse_args()
 
     # load in a trained model
@@ -63,7 +67,8 @@ if __name__ == '__main__':
         max_seq_length=128,
         task_name=args.task,
         cache_dir=None,
-        device='cpu'
+        device='cpu',
+        label_transform=args.label_transform
     )
     label_to_id = {v: k for k, v in transformer.label_id_map.items()}
 
@@ -127,7 +132,6 @@ if __name__ == '__main__':
                 csvwriter = csv.writer(fp)
                 # header
                 csvwriter.writerow(output_header)
-
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
@@ -147,7 +151,10 @@ if __name__ == '__main__':
 
         # load in gold standard
         gs_fn = data_path / 'ann' / f'{f[:-4]}.gs'
-        gs = load_labels(gs_fn)
+        if args.label_transform:
+            gs = label_transform(gs_fn)
+        else:
+            gs = load_labels(gs_fn)
 
         # convert labels to align with preds
         gs = sorted(gs, key=lambda x: x[1])
@@ -163,5 +170,5 @@ if __name__ == '__main__':
         label_tokens = [label_to_id[l.upper()] for l in label_tokens]
         labels.extend(label_tokens)
 
-    with open(args.output, 'wb') as fp:
-        pickle.dump([files, preds, labels, lengths, offsets], fp)
+    # with open(args.output, 'wb') as fp:
+    #     pickle.dump([files, preds, labels, lengths, offsets], fp)

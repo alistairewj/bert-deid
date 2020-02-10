@@ -63,9 +63,9 @@ def pattern_spans(text, pattern):
     
     Returns
     -------
-    token, start, offset
+    token, start, stop
         Tuple containing the token, the start index of the token
-        in the original string, and the length of the token ("offset")
+        in the original string, and the end index of the
     """
 
     tokens = pattern.split(text)

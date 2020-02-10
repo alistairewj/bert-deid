@@ -39,6 +39,53 @@ def load_labels(fn):
     
     return labels
 
+def load_labels_string(fn):
+    """Loads annotations from a CSV file with entity_type/start/stop columns."""
+    with open(fn, 'r') as fp:
+        csvreader = csv.reader(fp, delimiter=',', quotechar='"')
+        header = next(csvreader)
+        # identify which columns we want
+        idx = [
+            header.index('entity_type'),
+            header.index('start'),
+            header.index('stop'), 
+            header.index('entity')
+        ]
+
+        # iterate through the CSV and load in the labels as a list of tuples
+        #  (label name, start index, length of entity)
+        # e.g. labels = [('DATE', 36, 5, 'entity'), ('AGE', 45, 2, 'entity')]
+        labels = [
+            (
+                row[idx[0]], int(row[idx[1]]),
+                int(row[idx[2]]) - int(row[idx[1]]), row[idx[3]]
+            ) for row in csvreader
+        ]
+    
+    return labels
+
+def label_transform(fn):
+    # transform label into BIO scheme, separate an entity on space and punctuation
+    # e.g. labels = [('B-DATE', 36, 2),('I-DATE',39,1)]
+    labels = load_labels_string(fn)
+    new_labels = []
+    for (entity_type, start, _, entity) in labels:
+        split_by_space = entity.split(" ")
+        is_first = True
+        for each_split in split_by_space:
+            split_by_punctuation = re.findall(r"\w+|[^\w\s]", each_split, re.UNICODE)
+            for word in split_by_punctuation:
+                if is_first:
+                    new_entity_type = "B-"+entity_type
+                    is_first = False
+                else:
+                    new_entity_type = "I-"+entity_type
+                new_labels.append((new_entity_type, start, len(word)))
+                start += len(word)
+            start += 1
+
+    return new_labels
+
 
 class InputExample(object):
     """A single training/test example."""
@@ -59,7 +106,7 @@ class InputExample(object):
 
 class DataProcessor(object):
     """Base class for data converters."""
-    def __init__(self, data_dir, label_transform=None):
+    def __init__(self, data_dir, label_transform=False):
         """Initialize a data processor with the location of the data."""
         self.data_dir = data_dir
         self.data_filenames = None
@@ -70,8 +117,8 @@ class DataProcessor(object):
         """Gets the list of labels for this data set."""
         if self.label_list is None:
             raise NotImplementedError()
-        if self.label_transform is not None:
-            return [self.label_transform[l] for l in self.label_list]
+        if self.label_transform:
+            return ['O'] + ["B-"+l for l in self.label_list if l != 'O'] + ["I-"+l for l in self.label_list if l != 'O'] 
         else:
             return list(self.label_list)
 
@@ -120,7 +167,7 @@ class DataProcessor(object):
 
 class CoNLLProcessor(DataProcessor):
     """Processor for the gold standard de-id data set."""
-    def __init__(self, data_dir, label_transform=None):
+    def __init__(self, data_dir, label_transform=False):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir, label_transform=label_transform)
         # conll2003 filenames
@@ -160,8 +207,9 @@ class CoNLLProcessor(DataProcessor):
                 s_len = 0
                 for j, l in enumerate(sentence):
                     # label_new = combine_labels[label[j]]
-                    if self.label_transform is not None:
-                        label_new = self.label_transform[label[j]]
+                    if self.label_transform:
+                        # modify if needed later for CoNLL
+                        pass
                     else:
                         label_new = label[j]
 
@@ -193,7 +241,7 @@ class CoNLLProcessor(DataProcessor):
 
 class DeidProcessor(DataProcessor):
     """Processor for the de-id datasets."""
-    def __init__(self, data_dir, label_transform=None):
+    def __init__(self, data_dir, label_transform=False):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir, label_transform=label_transform)
         self.data_filenames = {'train': 'train', 'test': 'test'}
@@ -217,8 +265,10 @@ class DeidProcessor(DataProcessor):
 
             # load in the annotations
             fn = os.path.join(ann_path, f'{f[:-4]}.gs')
-            labels = load_labels(fn)
-
+            if self.label_transform:
+                labels = label_transform(fn)
+            else:
+                labels = load_labels(fn)
             examples.append(InputExample(guid=guid, text=text, labels=labels))
 
         return examples

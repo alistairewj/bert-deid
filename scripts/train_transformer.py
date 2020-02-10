@@ -317,6 +317,10 @@ def argparser():
     parser.add_argument(
         "--server_port", type=str, default="", help="For distant debugging."
     )
+    parser.add_argument(
+        "--label_transform", action="store_true",
+        help="Whether labels are transformed using BIO"
+    )
 
     return parser
 
@@ -707,6 +711,7 @@ def load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode
             str(args.max_seq_length)
         ),
     )
+
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info(
             "Loading features from cached file %s", cached_features_file
@@ -717,6 +722,7 @@ def load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode
         # get examples (mode can be 'train', 'test', or 'val')
         examples = processor.get_examples(mode)
         label_list = processor.get_labels()
+        print ("label list:", label_list)
         features = tokenization.convert_examples_to_features(
             examples,
             label_list,
@@ -822,7 +828,7 @@ def main():
     set_seed(args)
 
     # Prepare the task
-    processor = PROCESSORS[args.data_type](args.data_dir)
+    processor = PROCESSORS[args.data_type](args.data_dir, args.label_transform)
     num_labels = len(processor.get_labels())
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later

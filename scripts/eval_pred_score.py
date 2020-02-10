@@ -2,29 +2,27 @@ import csv
 import pandas as pd
 import glob
 import string
+import argparse
+import logging
+from pathlib import Path
+import os
+import re
+from tqdm import tqdm
+from collections import OrderedDict
 
-# maps dataframe id to corresponding filename
-df_id_filename = {}
+"""
+Runs BERT deid on a set of text files.
+Evaluates the output (matched correct PHI categories) using gold standard annotations.
 
-def load_data(path_to_anno, path_to_gold, anno_ext, gold_ext):
-    """
-    Parameter: path to annotated and gold standard files and corresponding externsion
-    Return: (list of dataframes about annotated data, list of dataframes about true data)
-    """
-    anno_dfs, gold_dfs = [], []
-    gold_files = glob.glob(path_to_gold+"*"+gold_ext)
-    counter = 0
-    for gold_file in gold_files:
-        gold_dfs.append(pd.read_csv(gold_file,delimiter=",",header=0))
-        anno_file = path_to_anno+gold_file.split("/")[-1].split(".")[0] + anno_ext
-        anno_dfs.append(pd.read_csv(anno_file,delimiter=",",header=0))
-        df_id_filename[counter] = gold_file.split("/")[-1]
-        counter += 1
-    
-    assert (len(anno_dfs) == len(gold_dfs))
-    assert (len(df_id_filename) == len(anno_dfs))
-    return anno_dfs, gold_dfs
+Optionally outputs mismatches to brat standoff format.
+"""
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 def merge_token(data):
     # intervals: a list of (start row index, stop row index, merged string from start row to stop row)
@@ -74,112 +72,262 @@ def merge_token(data):
         new_df = new_df.append({"document_id":document_id, "annotation_id":"","start":start,"stop":stop,
         "entity":entity_str, "entity_type":entity_type, "comment":""}, ignore_index=True)
 
-    # print (new_df)
     return new_df
 
-def evaluate(annos, golds, evaluation_type):
-    """
-    parameters:
-        anno, gold: a list of dataframes
-        evaluation_type: string, "ENTITY" or "TOKEN"
-    return:
-        tp, fp, fn
-    """
-    def get_entities(data):
-        entities = [(data["entity_type"].iloc[i].upper(), data["start"].iloc[i],
-        data["stop"].iloc[i]) for i in range(len(data))]
-        return entities
-    
-    def get_tokens(data):
-        tokens = []
-        # break up into word-level token
-        for _, row in data.iterrows():
-            entities = str(row["entity"]).split(" ")
-            entity_type = row["entity_type"]
-            start = row["start"]
-            for token in entities:
-                if len(token) > 0:
-                    tokens.append((entity_type.upper(), start, start+len(token)))
-                start += len(token) + 1
-        return tokens
 
-    
-    tp,fp,fn = 0, 0, 0
-    for i in range(len(golds)):
-        if evaluation_type.upper() == "ENTITY":
-            # entity level
-            pred = get_entities(annos[i])
-            true = get_entities(golds[i])
-        elif evaluation_type.upper() == "TOKEN":
-            # token level 
-            if len(annos[i]) > 1:
-                # at least two predicted to be merged
-                annos[i] = merge_token(annos[i])
-            pred = get_tokens(annos[i])
-            true = get_tokens(golds[i])
+def merge_BIO_pred(anno):
+    sort_by_start = anno.sort_values("start")
+    # find starting row index for each PHI predicted
+    entity_starts = []
+    for i, row in sort_by_start.iterrows():
+        if row["entity_type"][0] == "B":
+            entity_starts.append(i)
+    # create a new dataframe merging BIO annotations to original ann
+    new_anno = pd.DataFrame(columns=sort_by_start.columns)
+    for i in range(len(entity_starts)):
+        current_start_index = entity_starts[i]
+        if i == len(entity_starts)-1:
+            next_start_index = len(sort_by_start)
         else:
-            print ("Invalid input for evaluation type.")
-            return 
+            next_start_index = entity_starts[i+1]
+        entity_type = sort_by_start["entity_type"].iloc[current_start_index].split("-")[1]
+        start = sort_by_start["start"].iloc[current_start_index]
+        stop = sort_by_start["stop"].iloc[next_start_index-1]
+        entity = ""
+        for j in range(current_start_index, next_start_index-1):
+            entity += str(sort_by_start["entity"].iloc[j])
+            # HACK: this handles entity evaluation where BERT misses
+            # middle of entity but predict start and end correct
+            # in such case, token evaluation is worst than entity evaluation
+            # if only cares about correctly predict START, STOP, ENTITY TYPE.
+            for _ in range(sort_by_start["stop"].iloc[j], sort_by_start["start"].iloc[j+1]):
+                entity += " "
+        entity += str(sort_by_start["entity"].iloc[next_start_index-1])
+        new_anno = new_anno.append({"document_id":sort_by_start["document_id"].iloc[0], "annotation_id":"",
+        "start":start,"stop":stop,"entity":entity, "entity_type":entity_type,"cooment":""}, ignore_index=True)
+
+    return new_anno
+
+def get_entities(data):
+    entities = [(data["entity_type"].iloc[i].upper(), data["start"].iloc[i],
+    data["stop"].iloc[i], data["entity"].iloc[i].upper()) for i in range(len(data))]
+
+
+    return entities
+
+def get_tokens(data):
+    tokens = []
+    # break up into word-level token
+    for _, row in data.iterrows():
+        entities = str(row["entity"]).split(" ")
+        entity_type = row["entity_type"]
+        start = row["start"]
+        for token in entities:
+            if len(token) > 0:
+                tokens.append((entity_type.upper(), start, start+len(token), token.upper()))
+            start += len(token) + 1
+    return tokens
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--pred_path", required=True, type=str, help="Path for predicted albels"
+    )
+
+    parser.add_argument(
+        "--text_path",required=True,type=str,help="Path for de-identified text"
+    )
+
+    parser.add_argument(
+        "--ref_path", required=True, type=str, help="Gold standard labels"
+    )
+
+    parser.add_argument(
+        "--pred_extension",default="pred",type=str,
+        help=("Extension for prediction labels (default: pred)")
+    )
+
+    parser.add_argument(
+        "--ref_extension",default="gs",type=str,
+        help=("Extension for gold standard files in ref folder (default: gs)")
+    )
+
+    parser.add_argument(
+        "--label_transform", action="store_true",
+        help="Whether labels are transformed using BIO"
+    )
+
+    parser.add_argument(
+        "--token_eval", action="store_true",
+        help="Whether to perform token evaluation"
+    )
+
+    parser.add_argument(
+        "--entity_eval", action="store_true",
+        help="Whether to perform entity evaluation, only allowed if label is transformed with BIO scheme"
+    )
+
+    parser.add_argument(
+        "--log",type=str,default=None,help="text file to output false positive/negative to"
+    )
+
+    parser.add_argument(
+        "--csv_path",type=str,default=None,help="CSV file to output errors for labelling"
+    )
+
+    args = parser.parse_args()
+
+    ref_path = Path(args.ref_path)
+    pred_path = Path(args.pred_path)
+
+    csv_path = None
+    if args.csv_path is not None:
+        csv_path = Path(args.csv_path)
+        if not os.path.exists(csv_path.parents[0]):
+            os.makedirs(csv_path.parents[0])
+
+    log_path = None
+    if args.log is not None:
+        log_path = Path(args.log)
+        if not os.path.exists(log_path.parents[0]):
+            os.makedirs(log_path.parents[0])
+
+        log_text = OrderedDict(
+            [["False Negatives", ''],["False Positives",'']]
+        )
+
+    input_ext = '.txt'
+    gs_ext = args.ref_extension
+    if not gs_ext.startswith('.'):
+        gs_ext = '.' + gs_ext
+    pred_ext = args.pred_extension
+    if not pred_ext.startswith('.'):
+        pred_ext = '.' + pred_ext
+
+    # read files from folder
+    if os.path.exists(args.text_path):
+        input_path = Path(args.text_path)
+        files = os.listdir(input_path)
+
+        # remove extension and get file list
+        input_files = set(
+            [f[0:-len(input_ext)] for f in files if f.endswith(input_ext)]
+        )
+
+        input_files = sorted(list(input_files))
+    else:
+        raise ValueError('Input folder %s does not exist.', args.text_path)
+    
+    if args.token_eval and not args.entity_eval:
+        logger.info("***** Running token evaluation *****")
+    elif args.entity_eval and not args.token_eval and args.label_transform:
+        logger.info("***** Running entity evaluation *****")
+    else: 
+        raise ValueError (
+                "Invalid input arguments. Make sure labels are transformed if performing entity evaluation"
+        )
+    logger.info(" Num examples = %d", len(input_files))
+
+    true_positive, false_positive, false_negative = 0,0,0
+    perf_all = {}
+    total_eval = 0
+    for fn in tqdm(input_files,total=len(input_files)):
+        # load the text
+        with open(input_path / f'{fn}{input_ext}', 'r') as fp:
+            text = ''.join(fp.readlines())
+
+        # load output of bert-deid
+        fn_pred = pred_path / f'{fn}{pred_ext}'
+        df = pd.read_csv(
+            fn_pred, header=0,delimiter=",",
+            dtype={
+                'entity':str, 'entity_type':str
+                })
+        # load ground truth
+        gs_fn = ref_path / f'{fn}{gs_ext}'
+        gs = pd.read_csv(
+            gs_fn, header=0, delimiter=",",
+            dtype={
+                'entity':str,'entity_type':str
+            }
+        )
+
+        if args.label_transform:
+            df = merge_BIO_pred(df)
+
+
+        # entity evaluation
+        if args.entity_eval: 
+            pred = get_entities(df) 
+            true = get_entities(gs)
+        
+        else:  # token evaluaiton
+            if len(df) > 1 and not args.label_transform:
+                # at least two predicted to be merged
+                df = merge_token(df)
+            pred = get_tokens(df)
+            true = get_tokens(gs)
+
+
+        total_eval += len(true)
         current_tp = len(set(pred) & set(true))
-        tp += current_tp
-        fp += len(pred) - current_tp
-        fn += len(true) - current_tp
+        current_fp = len(pred) - current_tp
+        current_fn = len(true) - current_tp
+        true_positive += current_tp
+        false_positive += current_fp
+        false_negative += current_fn
 
-        ## Comment out to see text results for false positive and false negative
-        # if current_tp < len(pred):
-        #     fp_set = set(pred).difference((set(pred) & set(true)))
-        #     sorted_fp = sorted(list(fp_set), key=lambda x: x[1])
-        #     print ("document {}, false positive: ".format(df_id_filename[i]))
-        #     for each in sorted_fp:
-        #         print (str(each))
-        # if current_tp < len(true):
-        #     fn_set = set(true).difference((set(true) & set(pred)))
-        #     sorted_fn = sorted(list(fn_set), key=lambda x:x[1])
-        #     print ("document {}, false negative: ".format(df_id_filename[i]))
-        #     for other in sorted_fn:
-        #         print (str(other))
+        if (log_path is not None) and ((current_fp > 0) or (current_fn > 0)):
+            for key in log_text.keys():
+                if key == 'False Positives':
+                    false_set = set(pred).difference((set(pred) & set(true)))
+                else: 
+                    false_set = set(true).difference((set(pred) & set(true)))
+                sorted_fp = sorted(list(false_set), key=lambda x: x[1])
+                for (entity_type, start, stop, entity) in sorted_fp:
+                    log_text[key] += f'{fn},'
+                    log_text[key] += text[max(start - 50, 0):start].replace('\n', ' ')
+                    entity = text[start:stop]
+                    log_text[key] += "**" + entity.replace('\n', ' ') + "**"
+                    log_text[key] += text[stop:min(stop+50, len(text))].replace("\n", " ")
+                    log_text[key] += "\n"
+                    if (',' in entity) or ("\n" in entity) or ('"' in entity):
+                        entity = '"' + entity.replace('"', '""') + '"'
+                    log_text[key] += f'{fn},,{start},{stop},{entity},{entity_type},\n'
         
-        
-    print ("TP:{}, FP:{}, FN:{}".format(tp,fp,fn))
-    print ("Precision: {} and Recall: {}".format(tp/(tp+fp), tp/(tp+fn)))
-    return tp, fp, fn
+        perf_all[fn] = {'tp':current_tp, 'fp':current_fp, 'fn':current_fn}
+    
+    # convert to dataframe
+    info_df = pd.DataFrame.from_dict(perf_all, orient='index')
+
+    # print (info_df)
+    if args.token_eval:
+        print ("Number of tokens: {}".format(total_eval))
+    else:
+        print ("Number of entities: {}".format(total_eval))
+    print ("True positives: {}".format(true_positive))
+    print ("False positives: {}, false negatives: {}".format(false_positive, false_negative))
+
+    precision = true_positive/(true_positive+false_positive)
+    recall = true_positive/(true_positive+false_negative)
+    f1 = 2*precision*recall / (precision + recall)
+    print (f'Micro Se: {recall:0.3f}')
+    print (f'Micro P+: {precision:0.3f}')
+    print (f'Micro F1: {f1:0.3f}')
+
+    if log_path is not None:
+        # overwrite the log file
+        with open(log_path, 'w') as f:
+            for k, txt in log_text.items():
+                f.write(f'==={k} ===\n{txt}\n\n')
+
+    if csv_path is not None:
+        info_df.to_csv(csv_path)
 
 
-# fake data
-# doc 1 includes 
-    # 1. match (TP), 
-    # 2. system misses an entity (FN) 
-    # 3. system assigns wrong entity type (FP and FN)
-    # 4. system misses end boundary of entity (FP and FN)
-# doc 2 includes 
-    # 1. system hypothesized an entity (FP)
-    # 2. system predicts two different entities as one 
-    # 3. system extends both boundaries of an entity 
-# doc 3 includes
-    # 1. miss one token in an entity
-    # 2. system gets boundaries and entity type wrong
-    # 3. system breaks up entity into token (token level: TP)
-
-# path_to_anno = "/home/jingglin/research/fake_data/pred/"
-# path_to_gold = "/home/jingglin/research/fake_data/true/"
-# anno_dfs, gold_dfs = load_data(path_to_anno, path_to_gold, ".phi", ".gs")
-
-# # entity level 
-# assert (evaluate(anno_dfs, gold_dfs, "ENTITY") == (2,10,9))
-
-# # token level
-# assert (evaluate(anno_dfs, gold_dfs, "TOKEN") == (14,13,9))
-
-path_to_anno = "/home/jingglin/research/data/pred/physionet/train/"
-path_to_gold = "/home/jingglin/research/deid-gs/physionet/train/ann/"
-anno_dfs, gold_dfs = load_data(path_to_anno, path_to_gold, ".pred", ".gs")
-evaluate(anno_dfs, gold_dfs, "TOKEN")
-
-# individual file
-# anno_df = pd.read_csv("/home/jingglin/research/data/pred/physionet/6-1.pred", delimiter=",", header=0)
-# gold_df = pd.read_csv("/home/jingglin/research/deid-gs/physionet/test/ann/6-1.gs", delimiter=",", header=0)
-
-# evaluate([anno_df], [gold_df], "ENTITY")
+if __name__ == "__main__":
+    main()
 
 
     

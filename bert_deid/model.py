@@ -94,7 +94,8 @@ class Transformer(object):
         max_seq_length=128,
         task_name='i2b2_2014',
         cache_dir=None,
-        device='cpu'
+        device='cpu', 
+        label_transform=False
     ):
 
         if task_name not in PROCESSORS:
@@ -103,7 +104,7 @@ class Transformer(object):
             )
 
         # TODO: try to get labels from the transformer model itself
-        self.labels = PROCESSORS[task_name]('/tmp').get_labels()
+        self.labels = PROCESSORS[task_name]('/tmp', label_transform=label_transform).get_labels()
         self.num_labels = len(self.labels)
         self.label_id_map = {i: label for i, label in enumerate(self.labels)}
 
