@@ -173,6 +173,10 @@ if __name__ == '__main__':
             label_tokens = [
                 "PATIENT" if l.upper() == "NAME" else l for l in label_tokens
             ]
+            # HACK: "ID" should be "IDNUM"
+            label_tokens = [
+                "IDNUM" if l.upper() == "ID" else l for l in label_tokens
+            ]
 
         label_tokens = [label_to_id[l.upper()] for l in label_tokens]
         labels.extend(label_tokens)
