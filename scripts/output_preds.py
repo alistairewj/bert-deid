@@ -55,7 +55,8 @@ if __name__ == '__main__':
         help="Output folder for CSV stand-off annotations.",
     )
     parser.add_argument(
-        "--label_transform", action="store_true",
+        "--label_transform",
+        action="store_true",
         help="Whether labels are transformed using BIO"
     )
     args = parser.parse_args()
@@ -167,6 +168,12 @@ if __name__ == '__main__':
 
         # convert label tokens to label_ids
         # label_tokens = [label_to_id[pn_to_i2b2[l.upper()]] for l in label_tokens]
+        if 'physionet_google' in args.data_dir:
+            # HACK: map "NAME" gold standard to "PATIENT"
+            label_tokens = [
+                "PATIENT" if l.upper() == "NAME" else l for l in label_tokens
+            ]
+
         label_tokens = [label_to_id[l.upper()] for l in label_tokens]
         labels.extend(label_tokens)
 
