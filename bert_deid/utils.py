@@ -793,3 +793,90 @@ def add_brat_conf_files(out_path):
         tools_conf = ['[options]', 'Sentences	splitter:newline']
         with open(fn, 'w') as fp:
             fp.write('\n'.join(tools_conf))
+
+
+
+def split_by_token_entity(text, entities, start):
+    """
+    Split a token with conflict entity type
+        i.e. a token "Home/Bangdung" with "Home" as HOSPITAL, "/" as object, "Bangdung" as CITY
+        would be splitted into three tokens: "Home", "/", "Bandung"
+    """
+    prev_type = entities[0]
+    tokens, starts, ends = [], [], []
+    offset = 0
+    for i in range(len(text)):
+        if entities[i] != prev_type:
+            token = text[offset:i]
+            tokens.append(token)
+            starts.append(offset+start)
+            ends.append(offset+len(token)+start)
+            
+            offset += len(token)
+            prev_type = entities[i]
+    last_token = text[offset:len(text)]
+    tokens.append(last_token)
+    starts.append(offset+start)
+    ends.append(offset+len(last_token)+start)
+    return tokens, starts, ends
+
+
+def split_by_space(text):
+    """
+    Split a corpus by whitespace/new line to get token, corresponding start index and end index
+    """
+    offset = 0
+    for token in text.split():
+        offset = text.find(token,offset)
+        yield token, offset, offset+len(token)
+        offset += len(token)
+
+
+def compute_stats(df, is_token, is_micro):
+    """
+    Compute se (recall), ppv (precision), f1 score
+    """
+    type_eval = 'n_'
+    if is_token:
+        type_eval+='token_'
+    else:
+        type_eval+='entity_'
+    
+    tp = df[type_eval+'tp']
+    fp = df[type_eval+'fp']
+    fn = df[type_eval+'fn']
+    if is_micro:
+        tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
+    se = tp/(tp+fn)
+    ppv = tp/(tp+fp)
+    f1 = 2*se*ppv/(se+ppv)
+    return se, ppv, f1
+
+def get_entities(data):
+    """
+    Get PHI entities (entity, entity type, start, stop) from dataframe
+    """
+    entities = [(data['entity'].iloc[i], data['entity_type'].iloc[i].lower(),
+    data['start'].iloc[i], data['stop'].iloc[i]) for i in range(len(data))]
+
+    return entities
+
+def ignore_partials(phis):
+    """
+    Create a new data phis that ignore punctuation at front/end of entity
+    """
+    # phi set: (entity, entity_type, start, stop)
+    partials = (' ', '\r', '\n', ';', ':', '-')
+    new_phis = []
+    for (entity, entity_type, start, stop) in phis:
+        if entity[0] in partials:
+            entity = entity[1:]
+            start += 1
+
+        if len(entity) > 0:
+            if entity[-1] in partials:
+                entity = entity[:-1]
+                stop += 1
+        new_phis.append((entity, entity_type, start, stop))
+    return new_phis
+
