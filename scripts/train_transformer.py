@@ -20,6 +20,7 @@ import glob
 import logging
 import os
 import random
+from functools import partial
 
 import numpy as np
 import torch
@@ -318,8 +319,14 @@ def argparser():
         "--server_port", type=str, default="", help="For distant debugging."
     )
     parser.add_argument(
-        "--label_transform", action="store_true",
-        help="Whether labels are transformed using BIO"
+        "--bio", action='store_true',
+        help="Whether to transform labels to use inside-outside-beginning tags"
+    )
+    _LABEL_TRANSFORMS = list(processors.LABEL_MEMBERSHIP.keys())
+    parser.add_argument(
+        "--label_transform", default=None,
+        choices=_LABEL_TRANSFORMS,
+        help=f"Map labels using pre-coded transforms: {', '.join(_LABEL_TRANSFORMS)}"
     )
 
     return parser
@@ -828,7 +835,21 @@ def main():
     set_seed(args)
 
     # Prepare the task
-    processor = PROCESSORS[args.data_type](args.data_dir, args.label_transform)
+    # if we are transforming the labels, we need to pass processor a function
+    if args.label_transform is not None:
+        label_transform = partial(processors.transform_label, grouping=args.label_transform)
+        if args.bio:
+            # if bio label style is requested, we need wrap function with function
+            # this should be a proper decorator but I am a bad programmer
+            # not sure how to do dynamic decorators
+            label_transform = processors.bio_decorator(label_transform)
+    else:
+        if args.bio:
+            label_transform = processors.transform_label_to_bio
+        else:
+            label_transform = None
+
+    processor = PROCESSORS[args.data_type](args.data_dir, label_transform=label_transform)
     num_labels = len(processor.get_labels())
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later

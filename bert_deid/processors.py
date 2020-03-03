@@ -4,9 +4,6 @@ import os
 import sys
 import logging
 
-# from nltk.tokenize import sent_tokenize
-from bert_deid.utils import create_hamonize_label_dict
-
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
     datefmt='%m/%d/%Y %H:%M:%S',
@@ -14,32 +11,128 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Create a dictionary for mapping labels to standard categories.
+LABEL_MEMBERSHIP = {
+    'simple':
+    [
+        ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
+                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
+        ['PROFESSION', ['PROFESSION']],
+        ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION', 'URL',
+                        'STREET', 'STATE',
+                        'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
+                        'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                        'NATIONALITY']],
+        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+        ['DATE', ['DATE', 'DATEYEAR']],
+        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
+                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
+        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                        'IPADDR', 'IPADDRESS']]
+    ],
+    'hipaa':
+    [
+        ['NAME', ['NAME', 'PATIENT', 'USERNAME',
+                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
+        ['LOCATION', ['LOCATION', 'ORGANIZATION', 'HOSPITAL',
+                        'STREET', 'CITY', 'ZIP',
+                        'URL',
+                        'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                        'LOCATION-OTHER']],
+        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+        ['DATE', ['DATE', 'DATEYEAR']],
+        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
+                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
+        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                        # it is unclear whether these are HIPAA in i2b2 paper
+                        'IPADDR', 'IPADDRESS']],
+        ['O', ['DOCTOR', 'HCPNAME'
+                'PROFESSION',
+                'STATE', 'COUNTRY', 'NATIONALITY'
+                ]]
+    ],
+    'binary': 
+    [
+        ['PHI', ['NAME', 'PATIENT', 'USERNAME',
+                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL',
+                    'DOCTOR', 'HCPNAME',
+                    'LOCATION', 'ORGANIZATION', 'HOSPITAL',
+                    'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                    'LOCATION-OTHER',
+                    'STREET', 'CITY', 'ZIP',
+                    'STATE', 'COUNTRY',
+                    'NATIONALITY',
+                    # two URLs in i2b2 which aren't URLs but web service names
+                    'URL',
+                    'AGE', 'AGE_>_89', 'AGE > 89',
+                    'DATE', 'DATEYEAR',
+                    'BIOID', 'DEVICE', 'HEALTHPLAN',
+                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER',
+                    'EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                    'PROFESSION',
+                    'IPADDR', 'IPADDRESS']]
+        # , ['O', [ ]]
+    ]
+}
+
+# convert the lists within each dictionary to a dict
+def create_label_map(LABEL_MEMBERSHIP):
+    LABEL_MAP = {}
+    for grouping_name, label_members in LABEL_MEMBERSHIP.items():
+        LABEL_MAP[grouping_name] = {}
+        for harmonized_label, original_labels in label_members:
+            for label in original_labels:
+                LABEL_MAP[grouping_name][label] = harmonized_label
+    
+    return LABEL_MAP
+
+def transform_label(labels, grouping='simple'):
+    """
+    Groups entity types into a smaller set of categories.
+
+    Args:
+        labels (list): list of lists, 1st element should be the entity type.
+        grouping (str): how to group labels, options are:
+          'simple' - high-level categories, e.g. one category for age, one for name, etc
+          'hipaa' - only categories covered by HIPAA
+          'binary' - one label category: 'PHI' (non-PHI will become 'O')
+
+    Returns:
+        labels (list): list of sample size with grouped entity types
+    """
+    LABEL_MAP = create_label_map(LABEL_MEMBERSHIP)
+    return [[LABEL_MAP[grouping][label[0].upper()]] + label[1:] for label in labels]
+
+
+def transform_label_to_bio(labels):
+    # transform label into BIO scheme, separate an entity on space and punctuation
+    # e.g. labels = [('B-DATE', 36, 2),('I-DATE',39,1)]
+    new_labels = []
+    for (entity_type, start, _, entity) in labels:
+        split_by_space = entity.split(" ")
+        is_first = True
+        for each_split in split_by_space:
+            split_by_punctuation = re.findall(r"\w+|[^\w\s]", each_split, re.UNICODE)
+            for word in split_by_punctuation:
+                if is_first:
+                    new_entity_type = "B-" + entity_type
+                    is_first = False
+                else:
+                    new_entity_type = "I-" + entity_type
+                new_labels.append((new_entity_type, start, len(word)))
+                start += len(word)
+            start += 1
+
+    return new_labels
+
+def bio_decorator(func):
+    def function_wrapper(labels):
+        labels = func(labels)
+        labels = transform_label_to_bio(labels)
+        return labels
+    return function_wrapper
 
 def load_labels(fn):
-    """Loads annotations from a CSV file with entity_type/start/stop columns."""
-    with open(fn, 'r') as fp:
-        csvreader = csv.reader(fp, delimiter=',', quotechar='"')
-        header = next(csvreader)
-        # identify which columns we want
-        idx = [
-            header.index('entity_type'),
-            header.index('start'),
-            header.index('stop')
-        ]
-
-        # iterate through the CSV and load in the labels as a list of tuples
-        #  (label name, start index, length of entity)
-        # e.g. labels = [('DATE', 36, 5), ('AGE', 45, 2)]
-        labels = [
-            (
-                row[idx[0]], int(row[idx[1]]),
-                int(row[idx[2]]) - int(row[idx[1]])
-            ) for row in csvreader
-        ]
-    
-    return labels
-
-def load_labels_string(fn):
     """Loads annotations from a CSV file with entity_type/start/stop columns."""
     with open(fn, 'r') as fp:
         csvreader = csv.reader(fp, delimiter=',', quotechar='"')
@@ -54,7 +147,7 @@ def load_labels_string(fn):
 
         # iterate through the CSV and load in the labels as a list of tuples
         #  (label name, start index, length of entity)
-        # e.g. labels = [('DATE', 36, 5, 'entity'), ('AGE', 45, 2, 'entity')]
+        # e.g. labels = [('DATE', 36, 5), ('AGE', 45, 2)]
         labels = [
             (
                 row[idx[0]], int(row[idx[1]]),
@@ -63,29 +156,6 @@ def load_labels_string(fn):
         ]
     
     return labels
-
-def label_transform(fn):
-    # transform label into BIO scheme, separate an entity on space and punctuation
-    # e.g. labels = [('B-DATE', 36, 2),('I-DATE',39,1)]
-    labels = load_labels_string(fn)
-    new_labels = []
-    for (entity_type, start, _, entity) in labels:
-        split_by_space = entity.split(" ")
-        is_first = True
-        for each_split in split_by_space:
-            split_by_punctuation = re.findall(r"\w+|[^\w\s]", each_split, re.UNICODE)
-            for word in split_by_punctuation:
-                if is_first:
-                    new_entity_type = "B-"+entity_type
-                    is_first = False
-                else:
-                    new_entity_type = "I-"+entity_type
-                new_labels.append((new_entity_type, start, len(word)))
-                start += len(word)
-            start += 1
-
-    return new_labels
-
 
 class InputExample(object):
     """A single training/test example."""
@@ -106,7 +176,7 @@ class InputExample(object):
 
 class DataProcessor(object):
     """Base class for data converters."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir, label_transform=None):
         """Initialize a data processor with the location of the data."""
         self.data_dir = data_dir
         self.data_filenames = None
@@ -117,7 +187,8 @@ class DataProcessor(object):
         """Gets the list of labels for this data set."""
         if self.label_list is None:
             raise NotImplementedError()
-        if self.label_transform:
+        if self.label_transform is not None:
+            # HACK: move this into a function
             return ['O'] + ["B-"+l for l in self.label_list if l != 'O'] + ["I-"+l for l in self.label_list if l != 'O'] 
         else:
             return list(self.label_list)
@@ -167,7 +238,7 @@ class DataProcessor(object):
 
 class CoNLLProcessor(DataProcessor):
     """Processor for the gold standard de-id data set."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir, label_transform=None):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir, label_transform=label_transform)
         # conll2003 filenames
@@ -207,7 +278,7 @@ class CoNLLProcessor(DataProcessor):
                 s_len = 0
                 for j, l in enumerate(sentence):
                     # label_new = combine_labels[label[j]]
-                    if self.label_transform:
+                    if self.label_transform is not None:
                         # modify if needed later for CoNLL
                         pass
                     else:
@@ -241,10 +312,11 @@ class CoNLLProcessor(DataProcessor):
 
 class DeidProcessor(DataProcessor):
     """Processor for the de-id datasets."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir, label_transform=None):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir, label_transform=label_transform)
         self.data_filenames = {'train': 'train', 'test': 'test'}
+        self.__name__ = self.__name__ + str(label_transform)
 
     def _create_examples(self, fn, set_type):  # lines, set_type):
         """Creates examples for the training, validation, and test sets."""
@@ -265,10 +337,13 @@ class DeidProcessor(DataProcessor):
 
             # load in the annotations
             fn = os.path.join(ann_path, f'{f[:-4]}.gs')
-            if self.label_transform:
-                labels = label_transform(fn)
+            labels = load_labels(fn)
+            if self.label_transform is not None:
+                labels = self.label_transform(labels)
             else:
-                labels = load_labels(fn)
+                # remove the last element from labels
+                # this is the entity itself, not needed unless we are creating BIO labels
+                labels = [x[:-1] for x in labels]
             examples.append(InputExample(guid=guid, text=text, labels=labels))
 
         return examples
