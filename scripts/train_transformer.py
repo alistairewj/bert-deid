@@ -1,6 +1,7 @@
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020, Alistair Johnson.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Fine-tuning the library models for named entity recognition on CoNLL-2003 (Bert or Roberta). """
+"""Train a de-identification model using BERT based models."""
 
 import argparse
 import glob
@@ -57,8 +58,7 @@ from transformers import (
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
-
-PROCESSORS = processors.PROCESSORS
+from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -115,10 +115,10 @@ def argparser():
         default=None,
         type=str,
         required=True,
-        choices=tuple(PROCESSORS.keys()),
+        choices=LABEL_SETS,
         help=(
             "The input dataset type. "
-            "Valid choices: {}.".format(', '.join(PROCESSORS.keys()))
+            "Valid choices: {}.".format(', '.join(LABEL_SETS))
         ),
     )
     parser.add_argument(
@@ -342,7 +342,7 @@ def argparser():
         action='store_true',
         help="Whether to transform labels to use inside-outside-beginning tags"
     )
-    _LABEL_TRANSFORMS = list(processors.LABEL_MEMBERSHIP.keys())
+    _LABEL_TRANSFORMS = list(LABEL_MEMBERSHIP.keys())
     parser.add_argument(
         "--label_transform",
         default=None,
@@ -743,10 +743,10 @@ def load_and_cache_examples(
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
         args.data_dir,
-        "cached_{}_{}_{}".format(
+        "cached_{}_{}_{}_{}".format(
             mode,
             list(filter(None, args.model_name_or_path.split("/"))).pop(),
-            str(args.max_seq_length)
+            str(args.max_seq_length), processor.label_set.__name__
         ),
     )
 
@@ -759,11 +759,9 @@ def load_and_cache_examples(
         logger.info("Creating features from dataset file at %s", args.data_dir)
         # get examples (mode can be 'train', 'test', or 'val')
         examples = processor.get_examples(mode)
-        label_list = processor.get_labels()
-        print("label list:", label_list)
         features = tokenization.convert_examples_to_features(
             examples,
-            label_list,
+            processor.label_set.label_to_id,
             args.max_seq_length,
             tokenizer,
             cls_token_at_end=bool(args.model_type in ["xlnet"]),
@@ -873,25 +871,13 @@ def main():
     set_seed(args)
 
     # Prepare the task
-    # if we are transforming the labels, we need to pass processor a function
-    if args.label_transform is not None:
-        label_transform = partial(
-            processors.transform_label, grouping=args.label_transform
-        )
-        if args.bio:
-            # if bio label style is requested, we need wrap function with
-            # another function (i.e. a decorator)
-            label_transform = processors.bio_decorator(label_transform)
-    else:
-        if args.bio:
-            label_transform = processors.transform_label_to_bio
-        else:
-            label_transform = None
-
-    processor = PROCESSORS[args.data_type](
-        args.data_dir, label_transform=label_transform
+    processor = processors.DeidProcessor(
+        args.data_type,
+        args.data_dir,
+        bio=args.bio,
+        label_transform=args.label_transform
     )
-    num_labels = len(processor.get_labels())
+    num_labels = len(processor.label_set.label_list)
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index
