@@ -226,10 +226,12 @@ def tokenize_with_labels(
         return word_tokens, token_labels, token_sw, offsets, lengths
 
     w = 0
-    for label, start, offset in example.labels:
+    for label in example.labels:
+        entity_type = label.entity_type
+        start, offset = label.start, label.length
         stop = start + offset
         # HACK: force all labels to be upper case
-        label = label.upper()
+        entity_type = entity_type.upper()
         # get the first offset > than the label start index
         i = bisect_left(offsets, start)
         if i == len(offsets):
@@ -237,7 +239,7 @@ def tokenize_with_labels(
             # also catches the case that we label a part of a token
             # at the end of the text, but not the entire token
             if not token_sw[-1]:
-                token_labels[-1] = label
+                token_labels[-1] = entity_type
         else:
             # find the last token which is within this label
             j = bisect_left(offsets, stop)
@@ -245,7 +247,7 @@ def tokenize_with_labels(
             # assign all tokens between [start, stop] to this label
             # *except* if it is a padding token (so the model ignores subwords)
             new_labels = [
-                label if not token_sw[k] else pad_token_label_id
+                entity_type if not token_sw[k] else pad_token_label_id
                 for k in range(i, j)
             ]
             token_labels[i:j] = new_labels
@@ -255,7 +257,7 @@ def tokenize_with_labels(
 
 def convert_examples_to_features(
     examples,
-    label_list,
+    label_to_id,
     max_seq_length,
     tokenizer,
     cls_token_at_end=False,
@@ -285,8 +287,6 @@ def convert_examples_to_features(
                 of InputFeature 2, assuming that the InputExample is long enough to require splitting.
     """
 
-    label_map = {label: i for i, label in enumerate(label_list)}
-
     # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
     special_tokens_count = 3 if sep_token_extra else 2
 
@@ -302,7 +302,7 @@ def convert_examples_to_features(
 
         # assign labels based off the offsets
         ex_label_ids = [
-            label_map[l] if l != pad_token_label_id else pad_token_label_id
+            label_to_id[l] if l != pad_token_label_id else pad_token_label_id
             for l in ex_labels
         ]
 
