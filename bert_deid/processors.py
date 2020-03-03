@@ -14,66 +14,133 @@ logger = logging.getLogger(__name__)
 # Create a dictionary for mapping labels to standard categories.
 LABEL_MEMBERSHIP = {
     'simple':
-    [
-        ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
-                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
-        ['PROFESSION', ['PROFESSION']],
-        ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION', 'URL',
-                        'STREET', 'STATE',
-                        'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
-                        'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                        'NATIONALITY']],
-        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
-        ['DATE', ['DATE', 'DATEYEAR']],
-        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
-                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
-                        'IPADDR', 'IPADDRESS']]
-    ],
+        [
+            [
+                'NAME',
+                [
+                    'NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
+                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL'
+                ]
+            ], ['PROFESSION', ['PROFESSION']],
+            [
+                'LOCATION',
+                [
+                    'LOCATION', 'HOSPITAL', 'ORGANIZATION', 'URL', 'STREET',
+                    'STATE', 'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
+                    'PROTECTED_ENTITY', 'PROTECTED ENTITY', 'NATIONALITY'
+                ]
+            ], ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+            ['DATE', ['DATE', 'DATEYEAR']],
+            [
+                'ID',
+                [
+                    'BIOID', 'DEVICE', 'HEALTHPLAN', 'IDNUM', 'MEDICALRECORD',
+                    'ID', 'OTHER'
+                ]
+            ],
+            [
+                'CONTACT',
+                ['EMAIL', 'FAX', 'PHONE', 'CONTACT', 'IPADDR', 'IPADDRESS']
+            ]
+        ],
     'hipaa':
-    [
-        ['NAME', ['NAME', 'PATIENT', 'USERNAME',
-                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
-        ['LOCATION', ['LOCATION', 'ORGANIZATION', 'HOSPITAL',
-                        'STREET', 'CITY', 'ZIP',
-                        'URL',
-                        'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                        'LOCATION-OTHER']],
-        ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
-        ['DATE', ['DATE', 'DATEYEAR']],
-        ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
-                'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-        ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
-                        # it is unclear whether these are HIPAA in i2b2 paper
-                        'IPADDR', 'IPADDRESS']],
-        ['O', ['DOCTOR', 'HCPNAME'
-                'PROFESSION',
-                'STATE', 'COUNTRY', 'NATIONALITY'
-                ]]
-    ],
-    'binary': 
-    [
-        ['PHI', ['NAME', 'PATIENT', 'USERNAME',
-                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL',
-                    'DOCTOR', 'HCPNAME',
-                    'LOCATION', 'ORGANIZATION', 'HOSPITAL',
-                    'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+        [
+            [
+                'NAME',
+                [
+                    'NAME', 'PATIENT', 'USERNAME', 'RELATIVEPROXYNAME',
+                    'PTNAME', 'PTNAMEINITIAL'
+                ]
+            ],
+            [
+                'LOCATION',
+                [
+                    'LOCATION', 'ORGANIZATION', 'HOSPITAL', 'STREET', 'CITY',
+                    'ZIP', 'URL', 'PROTECTED_ENTITY', 'PROTECTED ENTITY',
+                    'LOCATION-OTHER'
+                ]
+            ],
+            ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
+            ['DATE', ['DATE', 'DATEYEAR']],
+            [
+                'ID',
+                [
+                    'BIOID', 'DEVICE', 'HEALTHPLAN', 'IDNUM', 'MEDICALRECORD',
+                    'ID', 'OTHER'
+                ]
+            ],
+            [
+                'CONTACT',
+                [
+                    'EMAIL',
+                    'FAX',
+                    'PHONE',
+                    'CONTACT',
+                    # it is unclear whether these are HIPAA in i2b2 paper
+                    'IPADDR',
+                    'IPADDRESS'
+                ]
+            ],
+            [
+                'O',
+                [
+                    'DOCTOR', 'HCPNAME'
+                    'PROFESSION', 'STATE', 'COUNTRY', 'NATIONALITY'
+                ]
+            ]
+        ],
+    'binary':
+        [
+            [
+                'PHI',
+                [
+                    'NAME',
+                    'PATIENT',
+                    'USERNAME',
+                    'RELATIVEPROXYNAME',
+                    'PTNAME',
+                    'PTNAMEINITIAL',
+                    'DOCTOR',
+                    'HCPNAME',
+                    'LOCATION',
+                    'ORGANIZATION',
+                    'HOSPITAL',
+                    'PROTECTED_ENTITY',
+                    'PROTECTED ENTITY',
                     'LOCATION-OTHER',
-                    'STREET', 'CITY', 'ZIP',
-                    'STATE', 'COUNTRY',
+                    'STREET',
+                    'CITY',
+                    'ZIP',
+                    'STATE',
+                    'COUNTRY',
                     'NATIONALITY',
                     # two URLs in i2b2 which aren't URLs but web service names
                     'URL',
-                    'AGE', 'AGE_>_89', 'AGE > 89',
-                    'DATE', 'DATEYEAR',
-                    'BIOID', 'DEVICE', 'HEALTHPLAN',
-                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER',
-                    'EMAIL', 'FAX', 'PHONE', 'CONTACT',
+                    'AGE',
+                    'AGE_>_89',
+                    'AGE > 89',
+                    'DATE',
+                    'DATEYEAR',
+                    'BIOID',
+                    'DEVICE',
+                    'HEALTHPLAN',
+                    'IDNUM',
+                    'MEDICALRECORD',
+                    'ID',
+                    'OTHER',
+                    'EMAIL',
+                    'FAX',
+                    'PHONE',
+                    'CONTACT',
                     'PROFESSION',
-                    'IPADDR', 'IPADDRESS']]
-        # , ['O', [ ]]
-    ]
+                    'IPADDR',
+                    'IPADDRESS'
+                ]
+            ]
+            # , ['O', [ ]]
+        ]
 }
+
 
 # convert the lists within each dictionary to a dict
 def create_label_map(LABEL_MEMBERSHIP):
@@ -83,8 +150,9 @@ def create_label_map(LABEL_MEMBERSHIP):
         for harmonized_label, original_labels in label_members:
             for label in original_labels:
                 LABEL_MAP[grouping_name][label] = harmonized_label
-    
+
     return LABEL_MAP
+
 
 def transform_label(labels, grouping='simple'):
     """
@@ -101,7 +169,9 @@ def transform_label(labels, grouping='simple'):
         labels (list): list of sample size with grouped entity types
     """
     LABEL_MAP = create_label_map(LABEL_MEMBERSHIP)
-    return [[LABEL_MAP[grouping][label[0].upper()]] + label[1:] for label in labels]
+    return [
+        [LABEL_MAP[grouping][label[0].upper()]] + label[1:] for label in labels
+    ]
 
 
 def transform_label_to_bio(labels):
@@ -112,7 +182,9 @@ def transform_label_to_bio(labels):
         split_by_space = entity.split(" ")
         is_first = True
         for each_split in split_by_space:
-            split_by_punctuation = re.findall(r"\w+|[^\w\s]", each_split, re.UNICODE)
+            split_by_punctuation = re.findall(
+                r"\w+|[^\w\s]", each_split, re.UNICODE
+            )
             for word in split_by_punctuation:
                 if is_first:
                     new_entity_type = "B-" + entity_type
@@ -125,12 +197,15 @@ def transform_label_to_bio(labels):
 
     return new_labels
 
+
 def bio_decorator(func):
     def function_wrapper(labels):
         labels = func(labels)
         labels = transform_label_to_bio(labels)
         return labels
+
     return function_wrapper
+
 
 def load_labels(fn):
     """Loads annotations from a CSV file with entity_type/start/stop columns."""
@@ -141,7 +216,7 @@ def load_labels(fn):
         idx = [
             header.index('entity_type'),
             header.index('start'),
-            header.index('stop'), 
+            header.index('stop'),
             header.index('entity')
         ]
 
@@ -154,8 +229,9 @@ def load_labels(fn):
                 int(row[idx[2]]) - int(row[idx[1]]), row[idx[3]]
             ) for row in csvreader
         ]
-    
+
     return labels
+
 
 class InputExample(object):
     """A single training/test example."""
@@ -189,7 +265,8 @@ class DataProcessor(object):
             raise NotImplementedError()
         if self.label_transform is not None:
             # HACK: move this into a function
-            return ['O'] + ["B-"+l for l in self.label_list if l != 'O'] + ["I-"+l for l in self.label_list if l != 'O'] 
+            return ['O'] + ["B-" + l for l in self.label_list if l != 'O'
+                           ] + ["I-" + l for l in self.label_list if l != 'O']
         else:
             return list(self.label_list)
 
