@@ -199,6 +199,12 @@ class LabelCollection(object):
             )
         self.label_list = self.define_label_set(data_type)
 
+        # update our label list using the transform
+        if self.transform is not None:
+            self.label_list = (
+                LABEL_MAP[self.transform][l] for l in self.label_list
+            )
+
         if self.bio:
             # update label list to match BIO format
             self.label_list = list(self.label_list)
