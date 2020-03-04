@@ -8,7 +8,8 @@ import logging
 import numpy as np
 from transformers import BertTokenizer
 from bert_deid.model import Transformer
-from bert_deid.processors import load_labels, label_transform
+from bert_deid.processors import DeidProcessor
+from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 from tqdm import tqdm
 
 logger = logging.getLogger()
@@ -40,7 +41,8 @@ if __name__ == '__main__':
         "--task",
         default='i2b2_2014',
         type=str,
-        help="Type of dataset",
+        choices=LABEL_SETS,
+        help=f"Type of dataset: {', '.join(LABEL_SETS)}.",
     )
     parser.add_argument(
         "--output",
@@ -55,23 +57,29 @@ if __name__ == '__main__':
         help="Output folder for CSV stand-off annotations.",
     )
     parser.add_argument(
-        "--label_transform",
-        action="store_true",
+        "--bio",
+        action='store_true',
         help="Whether labels are transformed using BIO"
     )
+    parser.add_argument(
+        "--label_transform",
+        choices=list(LABEL_MEMBERSHIP.keys()),
+        help="Label transformation to apply."
+    )
     args = parser.parse_args()
+
+    # prepare the label set - gives us mapping from ID to label
+    label_set = LabelCollection(args.task, bio=args.bio, transform=args.label_transform)
 
     # load in a trained model
     transformer = Transformer(
         args.model_type,
         args.model_dir,
         max_seq_length=128,
-        task_name=args.task,
         cache_dir=None,
-        device='cpu',
-        label_transform=args.label_transform
+        device='cpu'
     )
-    label_to_id = {v: k for k, v in transformer.label_id_map.items()}
+    label_to_id = transformer.label_set.label_to_id
 
     data_path = Path(args.data_dir)
 
@@ -94,27 +102,6 @@ if __name__ == '__main__':
     lengths = []
     offsets = []
     labels = []
-    # HACK: map physionet -> i2b2_2014
-    pn_to_i2b2 = {
-        'O': 'O',
-        # names
-        'HCPNAME': 'DOCTOR',
-        'RELATIVEPROXYNAME': 'PATIENT',
-        'PTNAME': 'PATIENT',
-        'PTNAMEINITIAL': 'PATIENT',
-        # professions
-        # locations
-        'LOCATION': 'LOCATION',
-        # ages
-        'AGE': 'AGE',
-        # dates
-        'DATE': 'DATE',
-        'DATEYEAR': 'DATE',
-        # IDs
-        'OTHER': 'IDNUM',
-        # contacts
-        'PHONE': 'PHONE'
-    }
 
     for f in tqdm(files, total=len(files), desc='Files'):
         with open(data_path / 'txt' / f, 'r') as fp:
@@ -136,7 +123,7 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    entity_type = transformer.label_id_map[np.argmax(
+                    entity_type = transformer.label_set.id_to_label[np.argmax(
                         ex_preds[i, :]
                     )]
                     # do not save object entity types
@@ -150,36 +137,26 @@ if __name__ == '__main__':
         lengths.append(ex_lengths)
         offsets.append(ex_offsets)
 
+        """
         # load in gold standard
         gs_fn = data_path / 'ann' / f'{f[:-4]}.gs'
-        if args.label_transform:
-            gs = label_transform(gs_fn)
-        else:
-            gs = load_labels(gs_fn)
 
-        # convert labels to align with preds
-        gs = sorted(gs, key=lambda x: x[1])
+        # load the gold standard labels into the label set
+        label_set.from_csv(gs_fn)
+        label_set.sort_labels()
+
+        # initialize all predictions as objects
         label_tokens = ['O'] * len(ex_offsets)
 
-        for i, g in enumerate(gs):
-            idxStart = bisect_left(ex_offsets, g[1])
-            idxStop = bisect_right(ex_offsets, g[1] + g[2])
-            label_tokens[idxStart:idxStop] = [g[0]] * (idxStop - idxStart)
-
-        # convert label tokens to label_ids
-        # label_tokens = [label_to_id[pn_to_i2b2[l.upper()]] for l in label_tokens]
-        if 'physionet_google' in args.data_dir:
-            # HACK: map "NAME" gold standard to "PATIENT"
-            label_tokens = [
-                "PATIENT" if l.upper() == "NAME" else l for l in label_tokens
-            ]
-            # HACK: "ID" should be "IDNUM"
-            label_tokens = [
-                "IDNUM" if l.upper() == "ID" else l for l in label_tokens
-            ]
+        for i, g in enumerate(label_set.labels):
+            # any tokens which overlap with 
+            idxStart = bisect_left(ex_offsets, g.start)
+            idxStop = bisect_right(ex_offsets, g.start + g.length)
+            label_tokens[idxStart:idxStop] = [g.entity_type] * (idxStop - idxStart)
 
         label_tokens = [label_to_id[l.upper()] for l in label_tokens]
         labels.extend(label_tokens)
+        """
 
     # with open(args.output, 'wb') as fp:
     #     pickle.dump([files, preds, labels, lengths, offsets], fp)
