@@ -39,6 +39,7 @@ from transformers import (
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
+from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
@@ -57,8 +58,6 @@ MODEL_CLASSES = {
             XLMRobertaTokenizer
         ),
 }
-
-PROCESSORS = processors.PROCESSORS
 
 def pool_annotations(df):
     # pool token-wise annotations together
@@ -92,21 +91,10 @@ class Transformer(object):
         # token_step_size=100,
         # sequence_length=100,
         max_seq_length=128,
-        task_name='i2b2_2014',
         cache_dir=None,
         device='cpu', 
-        label_transform=False
     ):
-
-        if task_name not in PROCESSORS:
-            raise ValueError(
-                f'Unrecognized task: {task_name}. Choices: {PROCESSORS.keys()}'
-            )
-
-        # TODO: try to get labels from the transformer model itself
-        self.labels = PROCESSORS[task_name]('/tmp', label_transform=label_transform).get_labels()
-        self.num_labels = len(self.labels)
-        self.label_id_map = {i: label for i, label in enumerate(self.labels)}
+        self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
 
         # Use cross entropy ignore index as padding label id so
         # that only real label ids contribute to the loss later
@@ -130,7 +118,7 @@ class Transformer(object):
         self.config = config_class.from_pretrained(
             #args.config_name if args.config_name else args.model_name_or_path,
             model_path,
-            num_labels=self.num_labels,
+            num_labels=len(self.label_set.label_list),
             cache_dir=cache_dir if cache_dir else None,
         )
 
@@ -228,7 +216,7 @@ class Transformer(object):
         examples = [processors.InputExample(guid=guid, text=text, labels=None)]
         features = tokenization.convert_examples_to_features(
             examples,
-            self.labels,
+            self.label_set.label_to_id,
             self.max_seq_length,
             self.tokenizer,
             cls_token_at_end=bool(self.model_type in ["xlnet"]),
