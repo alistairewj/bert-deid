@@ -222,15 +222,15 @@ class LabelCollection(object):
         # map labels to IDs
         self.label_to_id = {label: i for i, label in enumerate(self.label_list)}
 
-        # name of this object - used in caching
+        # name of this object - used in filename for caching
+        self.__name__ = data_type
         if self.transform is None:
-            self.__name__ = '_'.join(
-                [data_type, 'RawLabel', 'Bio' if self.bio else None]
-            )
+            self.__name__ += '_RawLabel'
         else:
-            self.__name__ = '_'.join(
-                [data_type, self.transform, 'Bio' if self.bio else None]
-            )
+            self.__name__ += f'_{self.transform}'
+        
+        if self.bio:
+            self.__name__ += '_Bio'
 
     def from_csv(self, filename):
         """Loads annotations from a CSV file
