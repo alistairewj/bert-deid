@@ -1,24 +1,26 @@
-from __future__ import absolute_import, division, print_function
 
-import json
-from collections import OrderedDict
-import os
-import re
-import logging
-import argparse
-from pathlib import Path
-
-from bert_deid import utils
-from tqdm import tqdm
-
-import pandas as pd
-import numpy as np
 """
 Runs BERT deid on a set of text files.
 Evaluates the output using gold standard annotations.
 
 Optionally outputs mismatches to brat standoff format.
 """
+from __future__ import absolute_import, division, print_function
+
+import json
+import os
+import re
+import logging
+import argparse
+from pathlib import Path
+from collections import OrderedDict
+
+from tqdm import tqdm
+import pandas as pd
+import numpy as np
+
+from bert_deid import utils, processors
+from bert_deid.label import LABEL_MEMBERSHIP, LABEL_SETS, Label
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -33,6 +35,9 @@ def main():
 
     parser.add_argument(
         "--pred_path", required=True, type=str, help="Path for model labels."
+    )
+    parser.add_argument(
+        "--adjuvant_path", default=None, type=str, help="Path for additional model labels."
     )
     parser.add_argument(
         "--text_path",
@@ -83,6 +88,10 @@ def main():
 
     ref_path = Path(args.ref_path)
     pred_path = Path(args.pred_path)
+    if args.adjuvant_path is not None:
+        adjuvant_path = Path(args.adjuvant_path)
+    else:
+        adjuvant_path = None
 
     csv_path = None
     if args.csv_path is not None:
@@ -143,6 +152,18 @@ def main():
             }
         )
 
+        if adjuvant_path is not None:
+            fn_pred = adjuvant_path / f'{fn}{pred_ext}'
+            if fn_pred.exists():
+                df2 = pd.read_csv(
+                    fn_pred, header=0, dtype={
+                        'entity': str,
+                        'entity_type': str
+                    }
+                )
+                df = pd.concat([df, df2], axis=0, ignore_index=True)
+                df.sort_values(['start', 'stop'], inplace=True)
+
         # load ground truth
         gs_fn = ref_path / f'{fn}{gs_ext}'
         gs = pd.read_csv(
@@ -151,9 +172,6 @@ def main():
                 'entity_type': str
             }
         )
-
-        # fix entities - lower case and group
-        gs = utils.combine_entity_types(gs, lowercase=True)
 
         # binary vector indicating PHI/not phi
         text_tar = np.zeros(len(text), dtype=bool)
@@ -263,18 +281,18 @@ def main():
     se = df['n_token_tp'] / (df['n_token_tp'] + df['n_token_fn'])
     ppv = df['n_token_tp'] / (df['n_token_tp'] + df['n_token_fp'])
     f1 = 2 * se * ppv / (se + ppv)
-    print(f'Macro Se: {se.mean():0.3f}')
-    print(f'Macro P+: {ppv.mean():0.3f}')
-    print(f'Macro F1: {f1.mean():0.3f}')
+    print(f'Macro Se: {se.mean():0.4f}')
+    print(f'Macro P+: {ppv.mean():0.4f}')
+    print(f'Macro F1: {f1.mean():0.4f}')
 
     se = df['n_token_tp'].sum(
     ) / (df['n_token_tp'].sum() + df['n_token_fn'].sum())
     ppv = df['n_token_tp'].sum(
     ) / (df['n_token_tp'].sum() + df['n_token_fp'].sum())
     f1 = 2 * se * ppv / (se + ppv)
-    print(f'Micro Se: {se.mean():0.3f}')
-    print(f'Micro P+: {ppv.mean():0.3f}')
-    print(f'Micro F1: {f1.mean():0.3f}')
+    print(f'Micro Se: {se.mean():0.4f}')
+    print(f'Micro P+: {ppv.mean():0.4f}')
+    print(f'Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file
