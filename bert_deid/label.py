@@ -197,30 +197,38 @@ class LabelCollection(object):
                     f'Choices: {", ".join(LABEL_SETS)}'
                 )
             )
-        self.label_list = self.define_label_set(data_type)
+        self.label_list = list(self.define_label_set(data_type))
 
         # update our label list using the transform
         if self.transform is not None:
-            self.label_list = tuple([
+            self.label_list = list(set([
                 LABEL_MAP[self.transform][l] for l in self.label_list
-            ])
+            ]))
+            self.label_list.sort()
+
+        # enforce 'O' to be first label in all cases
+        if 'O' in self.label_list:
+            additional_label = ['O']
+            self.label_list.pop(self.label_list.index('O'))
+        else:
+            additional_label = []
 
         if self.bio:
             # update label list to match BIO format
             self.label_list = list(self.label_list)
 
-            if 'O' in self.label_list:
-                additional_label = ['O']
-                self.label_list.pop(self.label_list.index('O'))
-            else:
-                additional_label = []
-
             self.label_list = ["B-" + l for l in self.label_list
                               ] + ["I-" + l for l in self.label_list]
-            self.label_list = tuple(additional_label + self.label_list)
+
+        # add the 'O' back
+        self.label_list = additional_label + self.label_list
+
+        # now make label_list immutable
+        self.label_list = tuple(self.label_list)
 
         # map labels to IDs
         self.label_to_id = {label: i for i, label in enumerate(self.label_list)}
+        self.id_to_label = {i: label for label, i in self.label_to_id.items()}
 
         # name of this object - used in filename for caching
         self.__name__ = data_type
@@ -270,6 +278,49 @@ class LabelCollection(object):
 
         # transform the labels if the user has requested it
         self.transform_labels()
+
+    def sort_labels(self):
+        if self.labels is not None:
+            self.labels = sorted(self.labels, key=lambda x: x.start)
+
+    def transform_label(self, label: Label):
+        """Return the transformed version of an input label."""
+        # creates a function to transform labels
+        if self.transform is not None:
+            label = label.map_entity_type(LABEL_MAP[self.transform])
+
+        if self.bio:
+            # convert label to BIO format
+            label = self.split_to_bio(label)
+
+        return label
+
+    def split_to_bio(self, label):
+        # transform label into BIO scheme,
+        # separate an entity on space and punctuation
+        # e.g. labels = [('B-DATE', 36, 2),('I-DATE',39,1)]
+        new_labels = []
+        start = label.start
+        split_by_space = label.entity.split(" ")
+        is_first = True
+        for each_split in split_by_space:
+            split_by_punctuation = re.findall(
+                r"\w+|[^\w\s]", each_split, re.UNICODE
+            )
+            for word in split_by_punctuation:
+                # punctuation is treated as a distinct entity
+                if is_first:
+                    new_entity_type = "B-" + label.entity_type
+                    is_first = False
+                else:
+                    new_entity_type = "I-" + label.entity_type
+                new_labels.append(
+                    Label(new_entity_type, start, len(word), entity=word)
+                )
+                start += len(word)
+            start += 1
+
+        return new_labels
 
     def transform_labels(self):
         """
