@@ -711,8 +711,10 @@ def evaluate(
     eval_loss = eval_loss / nb_eval_steps
     preds = np.argmax(preds, axis=2)
 
-    labels = processor.get_labels()
-    label_map = {i: label for i, label in enumerate(labels)}
+    labels = processor.label_set.label_list
+    label_map = processor.label_set.label_to_id
+    # invert the mapping from label to ID
+    label_map = {i: label for label, i in label_map.items()}
 
     out_label_list = [[] for _ in range(out_label_ids.shape[0])]
     preds_list = [[] for _ in range(out_label_ids.shape[0])]
@@ -876,13 +878,14 @@ def main():
     set_seed(args)
 
     # Prepare the task
-    processor = processors.DeidProcessor(
-        args.data_type,
-        args.data_dir,
-        bio=args.bio,
-        label_transform=args.label_transform
+    label_set = LabelCollection(
+        args.data_type, args.bio, transform=args.label_transform
     )
-    num_labels = len(processor.label_set.label_list)
+    num_labels = len(label_set.label_list)
+    processor = processors.DeidProcessor(
+        args.data_dir,
+        label_set
+    )
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index
@@ -960,6 +963,9 @@ def main():
 
         # save training arguments together with the trained model
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+
+        # save label set
+        torch.save(label_set, os.path.join(args.output_dir, "label_set.bin"))
 
     # Evaluation
     results = {}
