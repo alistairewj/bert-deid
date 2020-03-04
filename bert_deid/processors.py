@@ -33,26 +33,18 @@ class InputExample(object):
 
 class DataProcessor(object):
     """Base class for data converters."""
-    def __init__(self, data_dir, label_transform=None):
+    def __init__(self, data_dir):
         """Initialize a data processor with the location of the data."""
         self.data_dir = data_dir
         self.data_filenames = None
-        self.label_list = None
-        self.label_transform = label_transform
+        self.label_set = None
 
     def get_labels(self):
         """Gets the list of labels for this data set."""
-        if self.label_list is None:
+        if not hasattr(self, 'label_set'):
             raise NotImplementedError()
-        if self.label_transform is not None:
-            # wrap as list of lists to be compatible with label_transform
-            labels = [[l] for l in self.label_list]
-            labels = self.label_transform(labels)
-            labels = [l[0] for l in labels]
-            # add bio labels if necessary
-            return labels
         else:
-            return list(self.label_list)
+            return list(self.label_set.label_list)
 
     def _create_examples(self, fn, mode):
         raise NotImplementedError()
@@ -173,14 +165,11 @@ class CoNLLProcessor(DataProcessor):
 
 class DeidProcessor(DataProcessor):
     """Processor for the de-id datasets."""
-    def __init__(self, label_type, data_dir, bio=None, label_transform=None):
+    def __init__(self, data_dir, label_set):
         """Initialize a data processor with the location of the data."""
-        super().__init__(data_dir, label_transform=label_transform)
+        super().__init__(data_dir)
         self.data_filenames = {'train': 'train', 'test': 'test'}
-        self.label_type = label_type
-        self.label_set = LabelCollection(
-            label_type, bio=bio, transform=label_transform
-        )
+        self.label_set = label_set
 
     def _create_examples(self, fn, set_type):  # lines, set_type):
         """Creates examples for the training, validation, and test sets."""
