@@ -201,9 +201,9 @@ class LabelCollection(object):
 
         # update our label list using the transform
         if self.transform is not None:
-            self.label_list = list(set([
-                LABEL_MAP[self.transform][l] for l in self.label_list
-            ]))
+            self.label_list = list(
+                set([LABEL_MAP[self.transform][l] for l in self.label_list])
+            )
             self.label_list.sort()
 
         # enforce 'O' to be first label in all cases
@@ -236,7 +236,7 @@ class LabelCollection(object):
             self.__name__ += '_RawLabel'
         else:
             self.__name__ += f'_{self.transform}'
-        
+
         if self.bio:
             self.__name__ += '_Bio'
 
