@@ -247,6 +247,8 @@ def generate_token_arrays(
     tokens_true = []
     tokens_start, tokens_length = [], []
 
+    n_tokens = 0
+
     start = 0
     for token in tokens_base:
         # sometimes we have empty tokens on their own
@@ -259,6 +261,7 @@ def generate_token_arrays(
         if all(token_true == -1) & all(token_pred == -1):
             # skip tokens which are not labeled
             start += len(token)
+            n_tokens += 1
             continue
 
         if split_true_entities:
@@ -297,7 +300,8 @@ def generate_token_arrays(
 
             if expand_predictions:
                 # expand the most frequent ID to cover the entire token
-                token_pred = expand_id_to_token(token_pred, ignore_value)
+                token_pred = expand_id_to_token(token_pred, ignore_value=-1)
+                token_true = expand_id_to_token(token_true, ignore_value=-1)
 
             # get the length of the token for later
             token_len = len(token_true)
@@ -320,12 +324,14 @@ def generate_token_arrays(
             tokens_length.append(token_len)
 
             start += token_len
+            # keep track of total tokens assessed
+            n_tokens += 1
 
     # now we have a list of tokens with preds
     tokens_true = np.asarray(tokens_true, dtype=int)
     tokens_pred = np.asarray(tokens_pred, dtype=int)
 
-    return tokens_true, tokens_pred, tokens, tokens_start, tokens_length
+    return tokens_true, tokens_pred, tokens, tokens_start, tokens_length, n_tokens
 
 
 def main():
@@ -430,7 +436,7 @@ def main():
 
             # now evaluate the character-wise labels using some aggregation
             # an empty splitter results in character-wise evaluation
-            tokens_true, tokens_pred, tokens, tokens_start, tokens_length = generate_token_arrays(
+            tokens_true, tokens_pred, tokens, tokens_start, tokens_length, n_tokens = generate_token_arrays(
                 text,
                 text_tar,
                 text_pred,
@@ -445,11 +451,12 @@ def main():
             comparison['start'].extend(tokens_start)
             comparison['length'].extend(tokens_length)
             comparison['token'].extend(tokens)
-            comparison['truth'].extend(tokens_true.tolist())
-            comparison['pred'].extend(tokens_pred.tolist())
+            comparison['truth'].extend([gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_true])
+            comparison['pred'].extend([gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_pred])
 
             performance = {}
             performance['model'] = pred_folder.stem
+            performance['n_tokens'] = n_tokens
             performance['n_token_phi'] = len(tokens_true)
             performance['n_true_positive'] = sum((tokens_true >= 0) & (tokens_true == tokens_pred))
             performance['n_false_negative'] = sum((tokens_true >= 0) & (tokens_pred == -1))
