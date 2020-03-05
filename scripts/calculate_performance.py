@@ -67,6 +67,14 @@ def argparser():
         )
     )
 
+    # how to group text for evaluation
+    parser.add_argument(
+        '--splitter',
+        type=str,
+        default=None,
+        help='Regex pattern to split text into tokens for eval.'
+    )
+
     # output files for results
     parser.add_argument(
         '--stats_path',
@@ -75,10 +83,10 @@ def argparser():
         help='CSV file to output performance measures'
     )
     parser.add_argument(
-        '--errors_path',
+        '--tokens_path',
         type=str,
         default=None,
-        help='Text file to output errors to'
+        help='CSV file to output tokens with predictions.'
     )
 
     # label arguments
@@ -119,7 +127,7 @@ def get_characterwise_labels(label_set, text):
     Integer vectors are the same length as the text.
     """
     # integer vector indicating truth
-    label_ids = np.zeros(len(text), dtype=int)
+    label_ids = -1*np.ones(len(text), dtype=int)
     for label in label_set.labels:
         label_ids[label.start:label.start +
                   label.length] = label_set.label_to_id[label.entity_type]
@@ -161,7 +169,7 @@ def split_with_offsets(pattern, text):
 def mode(values, ignore_value=None):
     """Get the most frequent value, ignoring a specified value if desired."""
     if len(values) == 0:
-        return np.array([])
+        raise ValueError('Cannot calculate mode of length 0 array.')
 
     p_unique, p_counts = np.unique(values, return_counts=True)
     # remove our ignore index
@@ -201,7 +209,7 @@ def expand_id_to_token(token_pred, ignore_value=None):
     return token_pred
 
 
-def evaluate_performance(
+def generate_token_arrays(
     text,
     text_tar,
     text_pred,
@@ -230,18 +238,6 @@ def evaluate_performance(
         ignore_value - Ignore a label_id in the evaluation. Useful for ignoring
             the 'other' category.
     """
-    if -1 in text_tar:
-        raise ValueError(
-            'label_id of -1 is reserved for resolving token entity clashes.'
-        )
-    if -1 in text_pred:
-        raise ValueError(
-            'label_id of -1 is reserved for resolving token entity clashes.'
-        )
-
-    performance = {}
-    performance['n_char'] = len(text)
-
     # split text for token evaluation
     if splitter is None:
         splitter = ''
@@ -249,6 +245,7 @@ def evaluate_performance(
     tokens = []
     tokens_pred = []
     tokens_true = []
+    tokens_start, tokens_length = [], []
 
     start = 0
     for token in tokens_base:
@@ -258,6 +255,11 @@ def evaluate_performance(
         start = text.find(token, start)
         token_true = text_tar[start:start + len(token)]
         token_pred = text_pred[start:start + len(token)]
+
+        if all(token_true == -1) & all(token_pred == -1):
+            # skip tokens which are not labeled
+            start += len(token)
+            continue
 
         if split_true_entities:
             # split the single token into subtokens, based on the true entity
@@ -290,6 +292,9 @@ def evaluate_performance(
         # now iterate through our sub-tokens
         # often this is a length 1 iterator
         for token_true, token_pred in zip(subtoken_true, subtoken_pred):
+            if len(token_true) == 0:
+                continue
+
             if expand_predictions:
                 # expand the most frequent ID to cover the entire token
                 token_pred = expand_id_to_token(token_pred, ignore_value)
@@ -311,18 +316,16 @@ def evaluate_performance(
             tokens_true.append(token_true)
             tokens_pred.append(token_pred)
             tokens.append(text[start:start + token_len])
+            tokens_start.append(start)
+            tokens_length.append(token_len)
 
             start += token_len
 
-    # now we have a list of tokens with preds, calculate some stats
+    # now we have a list of tokens with preds
     tokens_true = np.asarray(tokens_true, dtype=int)
     tokens_pred = np.asarray(tokens_pred, dtype=int)
 
-    performance['n_token'] = len(tokens_true)
-    performance['n_token_phi'] = sum(tokens_true)
-    performance['n_token_tp'] = sum(tokens_true == tokens_pred)
-
-    return performance
+    return tokens_true, tokens_pred, tokens, tokens_start, tokens_length
 
 
 def main():
@@ -337,11 +340,11 @@ def main():
         if not os.path.exists(stats_path.parents[0]):
             os.makedirs(stats_path.parents[0])
 
-    errors_path = None
-    if args.errors_path is not None:
-        errors_path = Path(args.errors_path)
-        if not os.path.exists(errors_path.parents[0]):
-            os.makedirs(errors_path.parents[0])
+    tokens_path = None
+    if args.tokens_path is not None:
+        tokens_path = Path(args.tokens_path)
+        if not os.path.exists(tokens_path.parents[0]):
+            os.makedirs(tokens_path.parents[0])
 
         # log_text = OrderedDict(
         #     [['False Negatives', ''], ['False Positives', '']]
@@ -402,8 +405,11 @@ def main():
     gs = LabelCollection(args.task, args.bio, transform=args.label_transform)
     pred = LabelCollection(args.task, args.bio, transform=args.label_transform)
 
+    comparison = {}
+    for field in ['model', 'record', 'truth', 'pred', 'token', 'start', 'length']:
+        comparison[field] = []
+
     perf_all = {}
-    input_files = input_files[:100]
     # keep track of all PHI tokens in this dataset
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
@@ -424,24 +430,47 @@ def main():
 
             # now evaluate the character-wise labels using some aggregation
             # an empty splitter results in character-wise evaluation
-            performance = evaluate_performance(
+            tokens_true, tokens_pred, tokens, tokens_start, tokens_length = generate_token_arrays(
                 text,
                 text_tar,
                 text_pred,
-                splitter=r'',
+                splitter=args.splitter,
                 expand_predictions=True,
                 split_true_entities=True
             )
+
+            # retain comparison for later output
+            comparison['model'].extend([pred_folder.stem]*len(tokens))
+            comparison['record'].extend([fn]*len(tokens))
+            comparison['start'].extend(tokens_start)
+            comparison['length'].extend(tokens_length)
+            comparison['token'].extend(tokens)
+            comparison['truth'].extend(tokens_true.tolist())
+            comparison['pred'].extend(tokens_pred.tolist())
+
+            performance = {}
+            performance['model'] = pred_folder.stem
+            performance['n_token_phi'] = len(tokens_true)
+            performance['n_true_positive'] = sum((tokens_true >= 0) & (tokens_true == tokens_pred))
+            performance['n_false_negative'] = sum((tokens_true >= 0) & (tokens_pred == -1))
+            performance['n_false_positive'] = sum((tokens_true == -1) & (tokens_pred >= 0))
+            performance['n_mismatch'] = sum((tokens_true >= 0) & (tokens_pred >= 0) & (tokens_true != tokens_pred))
 
             perf_all[fn] = performance
 
     # convert to dataframe
     df = pd.DataFrame.from_dict(perf_all, orient='index')
+    df.index.name = 'record'
 
-    print(df)
+    print(df.head())
 
     if stats_path is not None:
         df.to_csv(stats_path)
+
+    comparison = pd.DataFrame.from_dict(comparison, orient='columns')
+    comparison.sort_values(['model', 'record', 'start'], inplace=True)
+    if tokens_path is not None:
+        comparison.to_csv(tokens_path, index=False)
 
 
 if __name__ == "__main__":
