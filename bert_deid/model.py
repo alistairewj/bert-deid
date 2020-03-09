@@ -13,6 +13,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import (
     DataLoader, RandomSampler, SequentialSampler, TensorDataset
 )
+import json
 
 from transformers import (
     WEIGHTS_NAME,
@@ -21,6 +22,7 @@ from transformers import (
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
+    BertModel,
     CamembertConfig,
     CamembertForTokenClassification,
     CamembertTokenizer,
@@ -39,6 +41,7 @@ from transformers import (
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
+from bert_deid.BERT_CRF import BertCRF
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
@@ -56,6 +59,7 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
+    'bert_crf': (BertConfig, BertModel, BertTokenizer)
 }
 
 PROCESSORS = processors.PROCESSORS
@@ -95,7 +99,8 @@ class Transformer(object):
         task_name='i2b2_2014',
         cache_dir=None,
         device='cpu', 
-        label_transform=False
+        label_transform=False, 
+        bert_model_name_or_path='bert-base-uncased'
     ):
 
         if task_name not in PROCESSORS:
@@ -105,12 +110,7 @@ class Transformer(object):
 
         # TODO: try to get labels from the transformer model itself
         self.labels = PROCESSORS[task_name]('/tmp', label_transform=label_transform).get_labels()
-        self.num_labels = len(self.labels)
-        self.label_id_map = {i: label for i, label in enumerate(self.labels)}
-
-        # Use cross entropy ignore index as padding label id so
-        # that only real label ids contribute to the loss later
-        self.pad_token_label_id = CrossEntropyLoss().ignore_index
+        self.num_labels = len(self.labels) + 3 # account for [CLS], [SEP], [PAD] special tokens
 
         # by default, we do non-overlapping segments of text
         # self.token_step_size = token_step_size
@@ -126,10 +126,13 @@ class Transformer(object):
         config_class, model_class, tokenizer_class = MODEL_CLASSES[
             self.model_type]
 
+        if model_type == 'bert_crf':
+            bert_model_path = bert_model_name_or_path
+        else:
+            bert_model_path = model_path
         # initialize the model
         self.config = config_class.from_pretrained(
-            #args.config_name if args.config_name else args.model_name_or_path,
-            model_path,
+            bert_model_path,
             num_labels=self.num_labels,
             cache_dir=cache_dir if cache_dir else None,
         )
@@ -143,18 +146,29 @@ class Transformer(object):
             self.do_lower_case = True
 
         self.tokenizer = tokenizer_class.from_pretrained(
-            #args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
-            model_path,
+            bert_model_path,
             do_lower_case=self.do_lower_case,
             cache_dir=cache_dir if cache_dir else None,
         )
         self.model = model_class.from_pretrained(
-            #args.model_name_or_path,
-            model_path,
+            bert_model_path,
             from_tf=bool(".ckpt" in model_path),
             config=self.config,
             cache_dir=cache_dir if cache_dir else None,
         )
+        if self.model_type == 'bert_crf':
+            self.model = BertCRF(num_classes=self.num_labels, bert_model=self.model, device=device)
+            self.model.from_pretrained(model_path)
+
+
+
+        self.special_tokens = [self.tokenizer.pad_token, self.tokenizer.cls_token, self.tokenizer.sep_token]
+        with open(os.path.join(model_path, 'label2id.json'), 'r') as f:
+            self.label2id = json.load(f)
+        self.special_token_ids = set([self.label2id[self.tokenizer.pad_token], self.label2id[self.tokenizer.cls_token], self.label2id[self.tokenizer.sep_token]])
+        self.id2label = {}
+        for label in self.label2id.keys():
+            self.id2label[self.label2id[label]] = label
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
@@ -228,23 +242,23 @@ class Transformer(object):
         examples = [processors.InputExample(guid=guid, text=text, labels=None)]
         features = tokenization.convert_examples_to_features(
             examples,
-            self.labels,
+            self.label2id,
             self.max_seq_length,
             self.tokenizer,
             cls_token_at_end=bool(self.model_type in ["xlnet"]),
             # xlnet has a cls token at the end
             cls_token=self.tokenizer.cls_token,
+            cls_token_label_id=self.label2id[self.tokenizer.cls_token],
             cls_token_segment_id=2 if self.model_type in ["xlnet"] else 0,
             sep_token=self.tokenizer.sep_token,
+            sep_token_label_id = self.label2id[self.tokenizer.sep_token],
             sep_token_extra=bool(self.model_type in ["roberta"]),
             # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
             pad_on_left=bool(self.model_type in ["xlnet"]),
             # pad on the left for xlnet
-            pad_token=self.tokenizer.convert_tokens_to_ids(
-                [self.tokenizer.pad_token]
-            )[0],
+            pad_token=self.tokenizer.pad_token,
             pad_token_segment_id=4 if self.model_type in ["xlnet"] else 0,
-            pad_token_label_id=self.pad_token_label_id,
+            pad_token_label_id=self.label2id[self.tokenizer.pad_token],
             feature_overlap=0
         )
 
@@ -295,12 +309,17 @@ class Transformer(object):
 
             # extract output predictions (logits) as a numpy array
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
+            batch_logits = batch_logits.detach().cpu().numpy()
+            if self.model_type == 'bert_crf':
+                # BertCRF only gives a label prediction currently
+                batch_logits = np.expand_dims(batch_logits, axis=2)
+                batch_logits = batch_logits.astype(int)
             if logits is None:
-                logits = batch_logits.detach().cpu().numpy()
+                logits = batch_logits
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
                 logits = np.append(
-                    logits, batch_logits.detach().cpu().numpy(), axis=0
+                    logits, batch_logits, axis=0
                 )
                 out_label_ids = np.append(
                     out_label_ids,
@@ -311,8 +330,10 @@ class Transformer(object):
         # re-align the predictions with the original text
         preds, offsets, lengths = [], [], []
         for f, feature in enumerate(features):
-            idxKeep = np.where(out_label_ids[f, :] != -100)[0]
+            # idxKeep = np.where(out_label_ids[f, :] != -100)[0]
             # get predictions for only the kept labels
+            idxKeep= np.isin(out_label_ids[f,:], list(self.special_token_ids), invert=True)
+            idxKeep = np.nonzero(idxKeep)[0]
             preds.append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
             offsets.extend(

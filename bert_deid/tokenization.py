@@ -255,16 +255,18 @@ def tokenize_with_labels(
 
 def convert_examples_to_features(
     examples,
-    label_list,
+    label2id,
     max_seq_length,
     tokenizer,
     cls_token_at_end=False,
     cls_token="[CLS]",
+    cls_token_label_id = -100,
     cls_token_segment_id=1,
     sep_token="[SEP]",
+    sep_token_label_id = -100,
     sep_token_extra=False,
     pad_on_left=False,
-    pad_token=0,
+    pad_token="[PAD]",
     pad_token_segment_id=0,
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
@@ -285,7 +287,6 @@ def convert_examples_to_features(
                 of InputFeature 2, assuming that the InputExample is long enough to require splitting.
     """
 
-    label_map = {label: i for i, label in enumerate(label_list)}
 
     # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
     special_tokens_count = 3 if sep_token_extra else 2
@@ -302,7 +303,7 @@ def convert_examples_to_features(
 
         # assign labels based off the offsets
         ex_label_ids = [
-            label_map[l] if l != pad_token_label_id else pad_token_label_id
+            label2id[l] if l != pad_token_label_id else pad_token_label_id
             for l in ex_labels
         ]
 
@@ -347,14 +348,14 @@ def convert_examples_to_features(
             offsets += [-1]
             lengths += [-1]
             token_sw += [False]
-            label_ids += [pad_token_label_id]
+            label_ids += [sep_token_label_id]
             if sep_token_extra:
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
                 offsets += [-1]
                 lengths += [-1]
                 token_sw += [-1]
-                label_ids += [pad_token_label_id]
+                label_ids += [sep_token_label_id]
             segment_ids = [sequence_a_segment_id] * len(tokens)
 
             if cls_token_at_end:
@@ -362,14 +363,14 @@ def convert_examples_to_features(
                 offsets += [-1]
                 lengths += [-1]
                 token_sw += [False]
-                label_ids += [pad_token_label_id]
+                label_ids += [cls_token_label_id]
                 segment_ids += [cls_token_segment_id]
             else:
                 tokens = [cls_token] + tokens
                 offsets = [-1] + offsets
                 lengths = [-1] + lengths
                 token_sw = [False] + token_sw
-                label_ids = [pad_token_label_id] + label_ids
+                label_ids = [cls_token_label_id] + label_ids
                 segment_ids = [cls_token_segment_id] + segment_ids
 
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -378,10 +379,11 @@ def convert_examples_to_features(
             # tokens are attended to.
             input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
 
+            pad_token_input_id = tokenizer.convert_tokens_to_ids([pad_token])[0]
             # Zero-pad up to the sequence length.
             padding_length = max_seq_length - len(input_ids)
             if pad_on_left:
-                input_ids = ([pad_token] * padding_length) + input_ids
+                input_ids = ([pad_token_input_id] * padding_length) + input_ids
                 input_mask = (
                     [0 if mask_padding_with_zero else 1] * padding_length
                 ) + input_mask
@@ -393,7 +395,7 @@ def convert_examples_to_features(
                 lengths = ([-1] * padding_length) + lengths
                 token_sw = ([False] * padding_length) + token_sw
             else:
-                input_ids += [pad_token] * padding_length
+                input_ids += [pad_token_input_id] * padding_length
                 input_mask += [
                     0 if mask_padding_with_zero else 1
                 ] * padding_length

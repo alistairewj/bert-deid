@@ -20,6 +20,7 @@ import glob
 import logging
 import os
 import random
+import json
 
 import numpy as np
 import torch
@@ -41,6 +42,7 @@ from transformers import (
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
+    BertModel,
     CamembertConfig,
     CamembertForTokenClassification,
     CamembertTokenizer,
@@ -58,6 +60,7 @@ from transformers import (
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
+from bert_deid.BERT_CRF import BertCRF
 
 PROCESSORS = processors.PROCESSORS
 
@@ -94,6 +97,7 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
+    "bert_crf": (BertConfig, BertModel, BertTokenizer)
 }
 
 
@@ -321,6 +325,12 @@ def argparser():
         "--label_transform", action="store_true",
         help="Whether labels are transformed using BIO"
     )
+    parser.add_argument(
+        "--crf_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout rate for BERT-CRF"
+    )
 
     return parser
 
@@ -332,7 +342,7 @@ def set_seed(args):
         torch.cuda.manual_seed_all(args.seed)
 
 
-def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
+def train(args, train_dataset, model, tokenizer, processor, label2id):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -358,7 +368,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
         ) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    no_decay = ["bias", "LayerNorm.weight"]
+    # no_decay = ["bias", "LayerNorm.weight"]
+    no_decay = ['bias', 'LayerNorm.bias','LayerNorm.weight']
     optimizer_grouped_parameters = [
         {
             "params":
@@ -449,6 +460,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
     if os.path.exists(args.model_name_or_path):
         # set global_step to gobal_step of last saved checkpoint from model path
         global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
+        # global_step = 0
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps
         )
@@ -503,7 +515,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
             outputs = model(**inputs)
             loss = outputs[
                 0
-            ]  # model outputs are always tuple in pytorch-transformers (see doc)
+            ]  # model outputs are always tuple in pytorch-transformers (see doc) \
+               # also for BertCRF returns (negative log-likelihood, predicted tag seq)
 
             if args.n_gpu > 1:
                 loss = loss.mean(
@@ -540,12 +553,20 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                     if (
                         args.local_rank == -1 and args.evaluate_during_training
                     ):  # Only evaluate when single GPU otherwise metrics may not average well
+                        eval_dataset = load_and_cache_examples(
+                            args=args,
+                            tokenizer=tokenizer,
+                            processor=processor,
+                            mode='dev',
+                            label2id=label2id
+                        )
                         results, _ = evaluate(
-                            args,
-                            model,
-                            tokenizer,
-                            processor,
-                            pad_token_label_id,
+                            args=args,
+                            eval_dataset=eval_dataset,
+                            model=model,
+                            tokenizer=tokenizer,
+                            processor=processor,
+                            label2id=label2id,
                             mode="dev"
                         )
                         for key, value in results.items():
@@ -609,11 +630,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
 
 
 def evaluate(
-    args, model, tokenizer, processor, pad_token_label_id, mode, prefix=""
+    args, eval_dataset, model, tokenizer, processor, label2id, mode, prefix=""
 ):
-    eval_dataset = load_and_cache_examples(
-        args, tokenizer, processor, pad_token_label_id, mode=mode
-    )
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
@@ -659,29 +677,38 @@ def evaluate(
 
             eval_loss += tmp_eval_loss.item()
         nb_eval_steps += 1
+
+        logits = logits.detach().cpu().numpy()
+        if args.model_type == 'bert_crf':
+            logits = logits.astype(int)
         if preds is None:
-            preds = logits.detach().cpu().numpy()
+            preds = logits
             out_label_ids = inputs["labels"].detach().cpu().numpy()
         else:
-            preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+            preds = np.append(preds, logits, axis=0)
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0
             )
 
     eval_loss = eval_loss / nb_eval_steps
-    preds = np.argmax(preds, axis=2)
+    if args.model_type != 'bert_crf':
+        preds = np.argmax(preds, axis=2)
 
-    labels = processor.get_labels()
-    label_map = {i: label for i, label in enumerate(labels)}
+    special_tokens = [tokenizer.pad_token, tokenizer.cls_token, tokenizer.sep_token]
+    special_tokens_id = set([label2id[token] for token in special_tokens]) # takes care multiple -100 for original bert
+
+    id2label = {}
+    for label in label2id.keys():
+        id2label[label2id[label]] = label 
 
     out_label_list = [[] for _ in range(out_label_ids.shape[0])]
     preds_list = [[] for _ in range(out_label_ids.shape[0])]
 
     for i in range(out_label_ids.shape[0]):
         for j in range(out_label_ids.shape[1]):
-            if out_label_ids[i, j] != pad_token_label_id:
-                out_label_list[i].append(label_map[out_label_ids[i][j]])
-                preds_list[i].append(label_map[preds[i][j]])
+            if out_label_ids[i, j] not in special_tokens_id:
+                out_label_list[i].append(id2label[out_label_ids[i][j]])
+                preds_list[i].append(id2label[preds[i][j]])
 
     results = {
         "loss": eval_loss,
@@ -697,7 +724,13 @@ def evaluate(
     return results, preds_list
 
 
-def load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode):
+def load_and_cache_examples(
+ args,
+ tokenizer,
+ processor,
+ mode,
+ label2id   
+): 
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier(
         )  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
@@ -721,25 +754,25 @@ def load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode
         logger.info("Creating features from dataset file at %s", args.data_dir)
         # get examples (mode can be 'train', 'test', or 'val')
         examples = processor.get_examples(mode)
-        label_list = processor.get_labels()
-        print ("label list:", label_list)
         features = tokenization.convert_examples_to_features(
             examples,
-            label_list,
+            label2id,
             args.max_seq_length,
             tokenizer,
             cls_token_at_end=bool(args.model_type in ["xlnet"]),
             # xlnet has a cls token at the end
             cls_token=tokenizer.cls_token,
+            cls_token_label_id=label2id[tokenizer.cls_token],
             cls_token_segment_id=2 if args.model_type in ["xlnet"] else 0,
             sep_token=tokenizer.sep_token,
+            sep_token_label_id=label2id[tokenizer.sep_token],
             sep_token_extra=bool(args.model_type in ["roberta"]),
             # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
             pad_on_left=bool(args.model_type in ["xlnet"]),
             # pad on the left for xlnet
-            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+            pad_token=tokenizer.pad_token,
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
-            pad_token_label_id=pad_token_label_id,
+            pad_token_label_id=label2id[tokenizer.pad_token],
             feature_overlap=0.1
         )
         if args.local_rank in [-1, 0]:
@@ -829,10 +862,11 @@ def main():
 
     # Prepare the task
     processor = PROCESSORS[args.data_type](args.data_dir, args.label_transform)
-    num_labels = len(processor.get_labels())
-    # Use cross entropy ignore index as padding label id so
-    # that only real label ids contribute to the loss later
-    pad_token_label_id = CrossEntropyLoss().ignore_index
+    label_list = processor.get_labels()
+    num_labels = len(label_list)+3 # account for [CLS], [SEP], [PAD] special tokens
+    args.model_type = args.model_type.lower()
+    # if args.model_type == 'bert_crf':
+    #     num_labels += 3 # additional labels: [CLS], [SEP], [PAD] in emission matrix
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
@@ -840,7 +874,6 @@ def main():
         # training will download model & vocab
         torch.distributed.barrier()
 
-    args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(
         args.config_name if args.config_name else args.model_name_or_path,
@@ -859,6 +892,26 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
 
+    if args.model_type == 'bert_crf':
+        model = BertCRF(num_classes=num_labels, bert_model=model, device=args.device,dropout=args.crf_dropout)
+        label2id = {'O': 0, tokenizer.cls_token: 1, tokenizer.sep_token: 2, tokenizer.pad_token:3}
+    else:
+        # special tokens all -100
+        # Use cross entropy ignore index as padding label id so
+        # that only real label ids contribute to the loss later
+        special_token_id = CrossEntropyLoss().ignore_index
+        label2id = {'O':0, tokenizer.cls_token: special_token_id, tokenizer.sep_token: special_token_id, tokenizer.pad_token: special_token_id}
+
+    
+    for label in label_list:
+        if label.upper() != 'O':
+            label2id[label] = len(label2id)
+
+    with open(os.path.join(args.output_dir, 'label2id.json'), 'w') as f:
+        json.dump(label2id, f, indent=4)
+    
+
+
     if args.local_rank == 0:
         # Make sure only the first process in distributed training
         # will download model & vocab
@@ -871,10 +924,14 @@ def main():
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(
-            args, tokenizer, processor, pad_token_label_id, mode="train"
+            args=args, 
+            tokenizer=tokenizer, 
+            processor=processor, 
+            mode="train", 
+            label2id=label2id
         )
         global_step, tr_loss = train(
-            args, train_dataset, model, tokenizer, processor, pad_token_label_id
+            args, train_dataset, model, tokenizer, processor, label2id
         )
         logger.info(
             " global_step = %s, average loss = %s", global_step, tr_loss
@@ -926,12 +983,14 @@ def main():
                                           )[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
+            eval_dataset=load_and_cache_examples(args, tokenizer, processor,mode='val', label2id=label2id)
             result, _ = evaluate(
-                args,
-                model,
-                tokenizer,
-                processor,
-                pad_token_label_id,
+                args=args,
+                eval_dataset=eval_dataset,
+                model=model,
+                tokenizer=tokenizer,
+                processor=processor,
+                label2id=label2id,
                 mode="val",
                 prefix=global_step
             )
@@ -952,8 +1011,15 @@ def main():
         )
         model = model_class.from_pretrained(args.output_dir)
         model.to(args.device)
+        test_dataset = load_and_cache_examples(args, tokenizer, processor, mode='test',label2id=label2id)
         result, predictions = evaluate(
-            args, model, tokenizer, processor, pad_token_label_id, mode="test"
+            args=args, 
+            eval_dataset=test_dataset,
+            model=model, 
+            tokenizer=tokenizer, 
+            processor=processor, 
+            label2id=label2id, 
+            mode="test"
         )
         # Save results
         output_test_results_file = os.path.join(

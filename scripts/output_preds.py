@@ -37,6 +37,12 @@ if __name__ == '__main__':
         "--model_type", default='bert', type=str, help="Type of model"
     )
     parser.add_argument(
+        '--model_name_or_path',
+        default='bert-base-uncased',
+        type=str,
+        help="Pretrained bert model used in training. Only require when model_type is 'bert_crf'."
+    )
+    parser.add_argument(
         "--task",
         default='i2b2_2014',
         type=str,
@@ -68,9 +74,9 @@ if __name__ == '__main__':
         task_name=args.task,
         cache_dir=None,
         device='cpu',
-        label_transform=args.label_transform
+        label_transform=args.label_transform,
+        bert_model_name_or_path=args.model_name_or_path
     )
-    label_to_id = {v: k for k, v in transformer.label_id_map.items()}
 
     data_path = Path(args.data_dir)
 
@@ -135,11 +141,15 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    entity_type = transformer.label_id_map[np.argmax(
-                        ex_preds[i, :]
-                    )]
+                    if args.model_type == 'bert_crf':
+                        assert(len(ex_preds[i,:]) == 1)
+                        entity_type = transformer.id2label[int(ex_preds[i,:][0])]
+                    else:
+                        entity_type = transformer.id2label[np.argmax(
+                            ex_preds[i, :]
+                        )]
                     # do not save object entity types
-                    if entity_type == 'O':
+                    if entity_type == 'O' or entity_type == "[CLS]" or entity_type == "[SEP]" or entity_type == "[PAD]":
                         continue
                     row = [
                         f[:-4],
@@ -167,7 +177,7 @@ if __name__ == '__main__':
 
         # convert label tokens to label_ids
         # label_tokens = [label_to_id[pn_to_i2b2[l.upper()]] for l in label_tokens]
-        label_tokens = [label_to_id[l.upper()] for l in label_tokens]
+        label_tokens = [transformer.label2id[l.upper()] for l in label_tokens]
         labels.extend(label_tokens)
 
     # with open(args.output, 'wb') as fp:
