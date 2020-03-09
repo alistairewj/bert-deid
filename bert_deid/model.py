@@ -17,7 +17,8 @@ from torch.utils.data import (
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
-    AlbertConfig, AlbertTokenizer,
+    AlbertConfig,
+    AlbertTokenizer,
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
@@ -59,6 +60,7 @@ MODEL_CLASSES = {
         ),
 }
 
+
 def pool_annotations(df):
     # pool token-wise annotations together
     # this is necessary if overlapping examples are used
@@ -67,8 +69,7 @@ def pool_annotations(df):
         return df
 
     # get location of maximally confident annotations
-    df_keep = df.groupby(['annotator', 'start',
-                            'stop'])[['confidence']].max()
+    df_keep = df.groupby(['annotator', 'start', 'stop'])[['confidence']].max()
 
     df_keep.reset_index(inplace=True)
 
@@ -91,8 +92,7 @@ class Transformer(object):
         # token_step_size=100,
         # sequence_length=100,
         max_seq_length=128,
-        cache_dir=None,
-        device='cpu', 
+        device='cpu',
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
 
@@ -115,34 +115,9 @@ class Transformer(object):
             self.model_type]
 
         # initialize the model
-        self.config = config_class.from_pretrained(
-            #args.config_name if args.config_name else args.model_name_or_path,
-            model_path,
-            num_labels=len(self.label_set.label_list),
-            cache_dir=cache_dir if cache_dir else None,
-        )
-
-        # determine if we are using an uncased vocabulary
-        #FIXME: not sure this works for xlm/roberta etc
-        if self.config.vocab_size == 28996:
-            self.do_lower_case = False
-        else:
-            # vocab_size == 30522
-            self.do_lower_case = True
-
-        self.tokenizer = tokenizer_class.from_pretrained(
-            #args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
-            model_path,
-            do_lower_case=self.do_lower_case,
-            cache_dir=cache_dir if cache_dir else None,
-        )
-        self.model = model_class.from_pretrained(
-            #args.model_name_or_path,
-            model_path,
-            from_tf=bool(".ckpt" in model_path),
-            config=self.config,
-            cache_dir=cache_dir if cache_dir else None,
-        )
+        self.config = config_class.from_pretrained(model_path)
+        self.tokenizer = tokenizer_class.from_pretrained(model_path)
+        self.model = model_class.from_pretrained(model_path)
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
