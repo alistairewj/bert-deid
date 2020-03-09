@@ -297,7 +297,7 @@ def main():
             else:
                 # no probabilities to agg
                 # output very high probability for 'OTHER' category
-                prob = -3 * np.ones(len(gs.label_list))
+                prob = -100 * np.ones(len(gs.label_list))
                 prob[gs.label_to_id['O']] = 100
 
             # default label_id is "OTHER"
