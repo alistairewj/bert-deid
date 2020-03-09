@@ -69,15 +69,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # prepare the label set - gives us mapping from ID to label
-    label_set = LabelCollection(args.task, bio=args.bio, transform=args.label_transform)
+    label_set = LabelCollection(
+        args.task, bio=args.bio, transform=args.label_transform
+    )
 
     # load in a trained model
     transformer = Transformer(
-        args.model_type,
-        args.model_dir,
-        max_seq_length=128,
-        cache_dir=None,
-        device='cpu'
+        args.model_type, args.model_dir, max_seq_length=128, device='cpu'
     )
     label_to_id = transformer.label_set.label_to_id
 
@@ -136,7 +134,6 @@ if __name__ == '__main__':
                     csvwriter.writerow(row)
         lengths.append(ex_lengths)
         offsets.append(ex_offsets)
-
         """
         # load in gold standard
         gs_fn = data_path / 'ann' / f'{f[:-4]}.gs'
