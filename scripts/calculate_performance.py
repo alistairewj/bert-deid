@@ -17,6 +17,10 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 
+import stanfordnlp
+import spacy
+from spacy.lang.en import English
+
 from bert_deid import utils, processors
 from bert_deid.tokenization import split_by_pattern
 from bert_deid.label import LABEL_MEMBERSHIP, LABEL_SETS, LabelCollection
@@ -69,7 +73,7 @@ def argparser():
 
     # how to group text for evaluation
     parser.add_argument(
-        '--splitter',
+        '--tokenizer',
         type=str,
         default=None,
         help='Regex pattern to split text into tokens for eval.'
@@ -127,7 +131,7 @@ def get_characterwise_labels(label_set, text):
     Integer vectors are the same length as the text.
     """
     # integer vector indicating truth
-    label_ids = -1*np.ones(len(text), dtype=int)
+    label_ids = -1 * np.ones(len(text), dtype=int)
     for label in label_set.labels:
         label_ids[label.start:label.start +
                   label.length] = label_set.label_to_id[label.entity_type]
@@ -213,7 +217,7 @@ def generate_token_arrays(
     text,
     text_tar,
     text_pred,
-    splitter=None,
+    tokenizer=None,
     expand_predictions=True,
     split_true_entities=True,
     ignore_value=None
@@ -225,7 +229,7 @@ def generate_token_arrays(
     Args
         text_tar - N length numpy array with integers for ground truth labels
         text_pred - N length numpy array with integers for predicted labels
-        splitter - Determines the granularity level of the evaluation.
+        tokenizer - Determines the granularity level of the evaluation.
             None or '' - character-wise evaluation
             r'\w' - word-wise evaluation
         expand_predictions - If a prediction is partially made for a
@@ -239,9 +243,23 @@ def generate_token_arrays(
             the 'other' category.
     """
     # split text for token evaluation
-    if splitter is None:
-        splitter = ''
-    tokens_base = re.split(splitter, text)
+    if isinstance(tokenizer, stanfordnlp.pipeline.core.Pipeline):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens_base = [
+            token.text for sentence in doc.sentences
+            for token in sentence.tokens
+        ]
+    elif isinstance(tokenizer, spacy.tokenizer.Tokenizer):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens_base = [token.text for token in doc]
+    else:
+        if tokenizer is None:
+            tokenizer = ''
+        # treat string as a regex
+        tokens_base = re.findall(tokenizer, text)
+
     tokens = []
     tokens_pred = []
     tokens_true = []
@@ -405,6 +423,18 @@ def main():
         )
         return
 
+    if args.tokenizer == 'stanford':
+        # use stanford core NLP to tokenize data
+        tokenizer = stanfordnlp.Pipeline(processors='tokenize', lang='en')
+    elif args.tokenizer == 'spacy':
+        # Create a Tokenizer with the default settings for English
+        # including punctuation rules and exceptions
+        nlp = spacy.lang.en.English()
+        tokenizer = nlp.Defaults.create_tokenizer(nlp)
+    else:
+        # will use regex (re.findall) with the given string to create tokens
+        tokenizer = args.tokenizer
+
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(input_files))
 
@@ -412,7 +442,9 @@ def main():
     pred = LabelCollection(args.task, args.bio, transform=args.label_transform)
 
     comparison = {}
-    for field in ['model', 'record', 'truth', 'pred', 'token', 'start', 'length']:
+    for field in [
+        'model', 'record', 'truth', 'pred', 'token', 'start', 'length'
+    ]:
         comparison[field] = []
 
     perf_all = {}
@@ -435,33 +467,46 @@ def main():
             text_pred = get_characterwise_labels(pred, text)
 
             # now evaluate the character-wise labels using some aggregation
-            # an empty splitter results in character-wise evaluation
+            # an empty tokenizer results in character-wise evaluation
             tokens_true, tokens_pred, tokens, tokens_start, tokens_length, n_tokens = generate_token_arrays(
                 text,
                 text_tar,
                 text_pred,
-                splitter=args.splitter,
+                tokenizer=tokenizer,
                 expand_predictions=True,
                 split_true_entities=True
             )
 
             # retain comparison for later output
-            comparison['model'].extend([pred_folder.stem]*len(tokens))
-            comparison['record'].extend([fn]*len(tokens))
+            comparison['model'].extend([pred_folder.stem] * len(tokens))
+            comparison['record'].extend([fn] * len(tokens))
             comparison['start'].extend(tokens_start)
             comparison['length'].extend(tokens_length)
             comparison['token'].extend(tokens)
-            comparison['truth'].extend([gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_true])
-            comparison['pred'].extend([gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_pred])
+            comparison['truth'].extend(
+                [gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_true]
+            )
+            comparison['pred'].extend(
+                [gs.id_to_label[t] if t >= 0 else np.nan for t in tokens_pred]
+            )
 
             performance = {}
             performance['model'] = pred_folder.stem
             performance['n_tokens'] = n_tokens
             performance['n_token_phi'] = len(tokens_true)
-            performance['n_true_positive'] = sum((tokens_true >= 0) & (tokens_true == tokens_pred))
-            performance['n_false_negative'] = sum((tokens_true >= 0) & (tokens_pred == -1))
-            performance['n_false_positive'] = sum((tokens_true == -1) & (tokens_pred >= 0))
-            performance['n_mismatch'] = sum((tokens_true >= 0) & (tokens_pred >= 0) & (tokens_true != tokens_pred))
+            performance['n_true_positive'] = sum(
+                (tokens_true >= 0) & (tokens_true == tokens_pred)
+            )
+            performance['n_false_negative'] = sum(
+                (tokens_true >= 0) & (tokens_pred == -1)
+            )
+            performance['n_false_positive'] = sum(
+                (tokens_true == -1) & (tokens_pred >= 0)
+            )
+            performance['n_mismatch'] = sum(
+                (tokens_true >= 0) & (tokens_pred >= 0) &
+                (tokens_true != tokens_pred)
+            )
 
             perf_all[fn] = performance
 
@@ -477,7 +522,11 @@ def main():
     comparison = pd.DataFrame.from_dict(comparison, orient='columns')
     comparison.sort_values(['model', 'record', 'start'], inplace=True)
     if tokens_path is not None:
-        comparison.to_csv(tokens_path, index=False)
+        if tokens_path.suffix == '.gz':
+            compression = 'gzip'
+        else:
+            compression = None
+        comparison.to_csv(tokens_path, index=False, compression=compression)
 
 
 if __name__ == "__main__":
