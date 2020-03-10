@@ -871,6 +871,27 @@ def expand_id_to_token(token_pred, ignore_value=None):
     return token_pred
 
 
+def tokenize_text(tokenizer, text):
+    """Split text into tokens using the given tokenizer."""
+    if isinstance(tokenizer, stanfordnlp.pipeline.core.Pipeline):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens = [
+            token.text for sentence in doc.sentences
+            for token in sentence.tokens
+        ]
+    elif isinstance(tokenizer, spacy.tokenizer.Tokenizer):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens = [token.text for token in doc]
+    else:
+        if tokenizer is None:
+            tokenizer = '\w'
+        # treat string as a regex
+        tokens = re.findall(tokenizer, text)
+    return tokens
+
+
 def generate_token_arrays(
     text,
     text_tar,
@@ -900,23 +921,7 @@ def generate_token_arrays(
         ignore_value - Ignore a label_id in the evaluation. Useful for ignoring
             the 'other' category.
     """
-    # split text for token evaluation
-    if isinstance(tokenizer, stanfordnlp.pipeline.core.Pipeline):
-        doc = tokenizer(text)
-        # extract tokens from the parsed text
-        tokens_base = [
-            token.text for sentence in doc.sentences
-            for token in sentence.tokens
-        ]
-    elif isinstance(tokenizer, spacy.tokenizer.Tokenizer):
-        doc = tokenizer(text)
-        # extract tokens from the parsed text
-        tokens_base = [token.text for token in doc]
-    else:
-        if tokenizer is None:
-            tokenizer = ''
-        # treat string as a regex
-        tokens_base = re.findall(tokenizer, text)
+    tokens_base = tokenize_text(tokenizer, text)
 
     tokens = []
     tokens_pred = []
