@@ -172,6 +172,16 @@ class Label(object):
         else:
             self.entity_type = mapping[self.entity_type]
 
+    def contains(self, i):
+        """Returns true if any label contains the offset."""
+        return (self.start >= i) & ((self.start + self.length) < i)
+
+    def overlaps(self, start, stop):
+        """Returns true if any label contains the start/stop offset."""
+        contains_start = (self.start >= start) & (self.start  < stop)
+        contains_stop = ((self.start + self.length) >= start) & ((self.start + self.length) < stop)
+        return contains_start | contains_stop
+
 
 class LabelCollection(object):
     """Base class for a collection of labels.
