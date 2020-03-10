@@ -70,3 +70,60 @@ for p in range(preds.shape[0]):
     label = transformer.label_id_map[idxMax]
     print(f'{text[start:stop]:15s} {label}')
 ```
+
+
+python scripts/calculate_performance.py --pred_path /data/models/predictions/simple --text_path /data/deid-gs/i2b2_2014/test/txt --ref_path /data/deid-gs/i2b2_2014/test/ann --stats_path i2b2_2014_stats.csv --task i2b2_2014 --label_transform simple --tokens_path i2b2_2014_comparison.csv --splitter "\\s"
+
+## Evaluation
+
+In order to compare to previous work, it's important to tokenize entities in a similar fashion.
+Dernoncourt and Lee et al. use [Stanford's CoreNLP tokenizer](https://github.com/stanfordnlp/python-stanford-corenlp) and [spaCy's tokenizer](https://spacy.io/usage#installation).
+Try this to install:
+
+```sh
+# install spacy
+conda install -c conda-forge spacy
+# download the model needed
+python -m spacy download en_core_web_sm
+
+# install stanford NLP
+pip install stanfordnlp
+# download the necessary resources
+python -c "import stanfordnlp; stanfordnlp.download('en', force=True)"
+```
+
+For further detail on installation and troubleshooting, [head over to their GitHub repository](https://github.com/stanfordnlp/python-stanford-corenlp).
+
+
+
+## PhysioNet Google annotations
+
+
+
+```python
+
+# on quadro
+
+CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/output_preds.py --data_dir /data/deid-gs/i2b2_2014/test --model_dir /data/models/bert-base-uncased-i2b2-2014 --model_type bert --task i2b2_2014 --output_folder i2b2_2014_test_output
+
+
+
+CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/eval_pred.py --pred_path i2b2_2014_test_output --text_path /data/deid-gs/i2b2_2014/test/txt --ref_path /data/deid-gs/i2b2_2014/test/ann
+
+```
+
+
+
+```python
+
+# on quadro
+
+CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/output_preds.py --data_dir /data/deid-gs/physionet_google/data --model_dir /data/models/bert-base-uncased-i2b2-2014 --model_type bert --task i2b2_2014 --output_folder physionet_google_output
+
+
+
+CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/eval_pred.py --pred_path physionet_google_output --text_path /data/deid-gs/physionet_google/data/txt --ref_path /data/deid-gs/physionet_google/data/ann
+
+```
+
+
