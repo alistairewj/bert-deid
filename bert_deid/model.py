@@ -239,13 +239,7 @@ class Transformer(object):
         logits = None
         out_label_ids = None
 
-        # based on logging level, control whether we report time to iterate
-        if logging.INFO >= logger.level:
-            batch_iterator = tqdm(eval_dataloader, desc="Evaluating")
-        else:
-            batch_iterator = eval_dataloader
-
-        for batch in batch_iterator:
+        for batch in eval_dataloader:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
