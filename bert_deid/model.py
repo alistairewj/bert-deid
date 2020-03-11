@@ -1,6 +1,7 @@
 """Class for applying BERT-deid on text."""
 import os
 import re
+import logging
 from hashlib import sha256
 
 import numpy as np
@@ -59,6 +60,8 @@ MODEL_CLASSES = {
             XLMRobertaTokenizer
         ),
 }
+
+logger = logging.getLogger(__name__)
 
 
 def pool_annotations(df):
@@ -235,9 +238,14 @@ class Transformer(object):
 
         logits = None
         out_label_ids = None
-        # eval_loss = 0.0
 
-        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+        # based on logging level, control whether we report time to iterate
+        if logging.INFO >= logger.level:
+            batch_iterator = tqdm(eval_dataloader, desc="Evaluating")
+        else:
+            batch_iterator = eval_dataloader
+
+        for batch in batch_iterator:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
