@@ -387,8 +387,6 @@ def main():
             (args.bio & (fn_list_entity is not None or fp_list_entity is not None))
         ):
 
-            # print ("fn", fn)
-            # print ('fn entity', fn_list_entity)
             for key in log_text.keys():
                 if key == 'False Positives Token':
                     false_list = fp_list

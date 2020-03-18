@@ -131,7 +131,15 @@ class CoNLLProcessor(DataProcessor):
                 s_len = 0
                 for j, l in enumerate(sentence):
                     # label_new = combine_labels[label[j]]
+<<<<<<< HEAD
                     label_new = label[j]
+=======
+                    if self.label_transform is not None:
+                        # modify if needed later for CoNLL
+                        pass
+                    else:
+                        label_new = label[j]
+>>>>>>> 27acb3656dcdf2531e5d9377663d426f9ac65274
 
                     label_offsets.append([label_new, s_len, len(l)])
                     # +1 to account for the whitespaces we insert below

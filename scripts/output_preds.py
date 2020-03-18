@@ -169,6 +169,7 @@ if __name__ == '__main__':
 
 
         label_tokens = [transformer.label_set.id_to_label[l.upper()] for l in label_tokens]
+
         labels.extend(label_tokens)
         """
 

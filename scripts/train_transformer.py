@@ -735,7 +735,6 @@ def evaluate(
     if args.model_type != 'bert_crf':
         preds = np.argmax(preds, axis=2)
 
-
     labels = processor.label_set.label_list
     label_map = processor.label_set.label_to_id
     # invert the mapping from label to ID
