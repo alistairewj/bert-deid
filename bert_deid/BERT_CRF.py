@@ -1,5 +1,4 @@
 import torch
-# from torchcrf import CRF
 from bert_deid.crf import CRF
 from torch import nn
 import os
@@ -22,7 +21,6 @@ class BertCRF(nn.Module):
         self.crf = CRF(num_tags=num_classes, batch_first=True).to(self.device)
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None):
-        # outputs : (last_encoder_layer, pooled_output, attention_weight)
         # return negative log-likelihood, predicted tag sequences if labels are given
         # otherwise return predicted tag sequences only
         outputs = self.bert(input_ids=input_ids,
@@ -35,7 +33,7 @@ class BertCRF(nn.Module):
         mask = (labels >=0).long()
         # torchCRF library assume no special tokens [cls] [sep] at either front of end of sequence
         last_encoder_layer = last_encoder_layer[:,1:-1,:]
-        # update all -100 to 0
+        # update all -100 to 0 to avoid indicies out-of-bound in CRF 
         labels = labels[:, 1:-1] * mask[:, 1:-1]
         mask = mask[:, 1:-1].byte()
         
@@ -51,20 +49,18 @@ class BertCRF(nn.Module):
             return None, tag_seqs
 
     def save_pretrained(self, save_dir):
+        """Save Bert-CRF model param weights"""
         assert os.path.isdir(
             save_dir
         )
         model_to_save = self.module if hasattr(self, "module") else self
-        # attach architecture to the config
-        # model_to_save.config.architectures = [model_to_save.__class__.__name__]
-        # # save configuration file
-        # model_to_save.config.save_pretrained(save_dir)
 
         output_model_file = os.path.join(save_dir, WEIGHTS_NAME)
         torch.save(model_to_save.state_dict(), output_model_file)
         logger.info("Model weights saved in {}".format(output_model_file))
 
     def from_pretrained(self, model_path):
+        """Load Bert-CRF model param weights"""
         if os.path.isfile(os.path.join(model_path, WEIGHTS_NAME)):
             achieve_file = os.path.join(model_path, WEIGHTS_NAME)
         else:

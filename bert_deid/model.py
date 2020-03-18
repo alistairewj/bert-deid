@@ -14,7 +14,6 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import (
     DataLoader, RandomSampler, SequentialSampler, TensorDataset
 )
-import json
 
 from transformers import (
     WEIGHTS_NAME,
@@ -99,8 +98,6 @@ class Transformer(object):
         # token_step_size=100,
         # sequence_length=100,
         max_seq_length=128,
-        task_name='i2b2_2014',
-        cache_dir=None,
         device='cpu', 
         bert_model_name_or_path='bert-base-uncased'
     ):
@@ -124,11 +121,10 @@ class Transformer(object):
         if model_type == 'bert_crf':
             # use pretrained bert model path to initialize BertCRF object
             new_model_path = bert_model_name_or_path
-
         else:
             new_model_path = model_path
-            # Use cross entropy ignore index as padding label id so
-            # that only real label ids contribute to the loss later
+        # Use cross entropy ignore index as padding label id so
+        # that only real label ids contribute to the loss later
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
         # initialize the model
         self.config = config_class.from_pretrained(new_model_path)
@@ -304,10 +300,8 @@ class Transformer(object):
         # re-align the predictions with the original text
         preds, offsets, lengths = [], [], []
         for f, feature in enumerate(features):
-            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id)[0]
             # get predictions for only the kept labels
-            # idxKeep= np.isin(out_label_ids[f,:], list(self.special_token_ids), invert=True)
-            # idxKeep = np.nonzero(idxKeep)[0]
+            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id)[0]
             preds.append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
             offsets.extend(

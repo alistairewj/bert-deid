@@ -81,18 +81,9 @@ if __name__ == '__main__':
 
     # load in a trained model
     transformer = Transformer(
-<<<<<<< HEAD
-        args.model_type,
-        args.model_dir,
-        max_seq_length=128,
-        device='cpu',
-        bert_model_name_or_path=args.model_name_or_path
+        args.model_type, args.model_dir, max_seq_length=128, device='cpu', bert_model_name_or_path=args.model_name_or_path
     )
 
-=======
-        args.model_type, args.model_dir, max_seq_length=128, device='cpu'
-    )
->>>>>>> 27acb3656dcdf2531e5d9377663d426f9ac65274
     label_to_id = transformer.label_set.label_to_id
 
     data_path = Path(args.data_dir)
@@ -137,20 +128,15 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-<<<<<<< HEAD
                     if args.model_type == 'bert_crf':
                         assert(len(ex_preds[i,:]) == 1)
+                        # BertCRF gives one predicted tag id: (batch_size, max_seq_len, 1)
                         entity_type = transformer.label_set.id_to_label[int(ex_preds[i,:][0])]
                     else:
                         entity_type = transformer.label_set.id_to_label[np.argmax(
                             ex_preds[i, :]
                         )]
 
-=======
-                    entity_type = transformer.label_set.id_to_label[np.argmax(
-                        ex_preds[i, :]
-                    )]
->>>>>>> 27acb3656dcdf2531e5d9377663d426f9ac65274
                     # do not save object entity types
                     if entity_type == 'O':
                         continue
@@ -177,15 +163,8 @@ if __name__ == '__main__':
             idxStart = bisect_left(ex_offsets, g.start)
             idxStop = bisect_right(ex_offsets, g.start + g.length)
             label_tokens[idxStart:idxStop] = [g.entity_type] * (idxStop - idxStart)
-<<<<<<< HEAD
-
-
-        label_tokens = [transformer.label_set.id_to_label[l.upper()] for l in label_tokens]
-
-=======
 
         label_tokens = [label_to_id[l.upper()] for l in label_tokens]
->>>>>>> 27acb3656dcdf2531e5d9377663d426f9ac65274
         labels.extend(label_tokens)
         """
 

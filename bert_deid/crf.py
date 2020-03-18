@@ -1,5 +1,4 @@
 from typing import List, Optional
-
 import torch
 import torch.nn as nn
 
@@ -148,11 +147,10 @@ class CRF(nn.Module):
                 raise ValueError(
                     'the first two dimensions of emissions and mask must match, '
                     f'got {tuple(emissions.shape[:2])} and {tuple(mask.shape)}')
+        # below conditions are not true in our case as we can start with a subword 
+        # which is masked in calculating loss
         #     no_empty_seq = not self.batch_first and mask[0].all()
         #     no_empty_seq_bf = self.batch_first and mask[:, 0].all()
-        #     print ('mask', mask[:, 0])
-        #     print ('tags', tags[:, 0])
-        #     print ('no exmpty seq bf', no_empty_seq_bf)
         #     if not no_empty_seq and not no_empty_seq_bf:
         #         raise ValueError('mask of the first timestep must all be on')
 
@@ -208,7 +206,7 @@ class CRF(nn.Module):
         # (batch_size, num_tags) where for each batch, the j-th column stores
         # the score that the first timestep has tag j
         # shape: (batch_size, num_tags)
-        score = self.start_transitions + emissions[0]
+        score = (self.start_transitions + emissions[0])*mask[0].unsqueeze(1).float()
 
         for i in range(1, seq_length):
             # Broadcast score for every possible next tag
@@ -256,7 +254,7 @@ class CRF(nn.Module):
 
         # Start transition and first emission
         # shape: (batch_size, num_tags)
-        score = self.start_transitions + emissions[0]
+        score = (self.start_transitions + emissions[0])*mask[0].unsqueeze(1).float()
         history = []
 
         # score is a tensor of size (batch_size, num_tags) where for every batch,
