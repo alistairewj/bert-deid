@@ -223,6 +223,12 @@ class LabelCollection(object):
         else:
             additional_label = []
 
+        # update our label list using the transform
+        if self.transform is not None:
+            self.label_list = tuple([
+                LABEL_MAP[self.transform][l] for l in self.label_list
+            ])
+
         if self.bio:
             # update label list to match BIO format
             self.label_list = list(self.label_list)

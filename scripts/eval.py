@@ -14,7 +14,7 @@ from tqdm import tqdm
 from collections import OrderedDict
 
 from bert_deid import processors
-from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP
+from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
 
 """
 Runs BERT deid on a set of text files.
@@ -238,17 +238,14 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    processor = processors.DeidProcessor(
-        args.data_type,
-        None,
-        bio=args.bio,
-        label_transform=args.label_transform
+    label_set = LabelCollection(
+        data_type=args.data_type, bio=None, transform=args.label_transform
     )
-    labels = tuple(processor.label_set.label_list)
+    # labels = tuple(label_set.label_list)
     # labels.remove('O')
 
     # get the label to ID map from the label set
-    label2id_map = processor.label_set.label_to_id
+    label2id_map = label_set.label_to_id
 
     # read files from folder
     if os.path.exists(args.text_path):
@@ -308,7 +305,10 @@ def main():
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
         for i, row in gs.iterrows():
-            text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
+            if args.binary_eval:
+                text_tar[row['start']:row['stop']] = 1
+            else:
+                text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
         text_pred = np.zeros(len(text), dtype=int)
         for i, row in df.iterrows():
             if args.bio:
@@ -321,7 +321,10 @@ def main():
                 if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
                     raise ValueError("Required --bio arg. Data prediction uses BIO scheme")
                 entity_type = row['entity_type']
-            text_pred[row['start']:row['stop']] = label2id_map[entity_type]
+            if args.binary_eval:
+                text_pred[row['start']:row['stop']] = 1
+            else:
+                text_pred[row['start']:row['stop']] = label2id_map[entity_type]
 
 
         curr_performance = {}
@@ -384,8 +387,6 @@ def main():
             (args.bio & (fn_list_entity is not None or fp_list_entity is not None))
         ):
 
-            # print ("fn", fn)
-            # print ('fn entity', fn_list_entity)
             for key in log_text.keys():
                 if key == 'False Positives Token':
                     false_list = fp_list
@@ -429,25 +430,25 @@ def main():
 
     # summary stats
     se, ppv, f1 = utils.compute_stats(df, True, False)
-    print(f'Token Macro Se: {se.mean():0.3f}')
-    print(f'Token Macro P+: {ppv.mean():0.3f}')
-    print(f'Token Macro F1: {f1.mean():0.3f}')
+    print(f'Token Macro Se: {se.mean():0.4f}')
+    print(f'Token Macro P+: {ppv.mean():0.4f}')
+    print(f'Token Macro F1: {f1.mean():0.4f}')
 
     se, ppv, f1 = utils.compute_stats(df, True, True)
-    print(f'Token Micro Se: {se.mean():0.3f}')
-    print(f'Token Micro P+: {ppv.mean():0.3f}')
-    print(f'Token Micro F1: {f1.mean():0.3f}')
+    print(f'Token Micro Se: {se.mean():0.4f}')
+    print(f'Token Micro P+: {ppv.mean():0.4f}')
+    print(f'Token Micro F1: {f1.mean():0.4f}')
 
     if args.bio:
         se, ppv, f1 = utils.compute_stats(df, False, False)
-        print(f'Entity Macro Se: {se.mean():0.3f}')
-        print(f'Entity Macro P+: {ppv.mean():0.3f}')
-        print(f'Entity Macro F1: {f1.mean():0.3f}')
+        print(f'Entity Macro Se: {se.mean():0.4f}')
+        print(f'Entity Macro P+: {ppv.mean():0.4f}')
+        print(f'Entity Macro F1: {f1.mean():0.4f}')
 
         se, ppv, f1 = utils.compute_stats(df, False, True)
-        print(f'Entity Micro Se: {se.mean():0.3f}')
-        print(f'Entity Micro P+: {ppv.mean():0.3f}')
-        print(f'Entity Micro F1: {f1.mean():0.3f}')
+        print(f'Entity Micro Se: {se.mean():0.4f}')
+        print(f'Entity Micro P+: {ppv.mean():0.4f}')
+        print(f'Entity Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file

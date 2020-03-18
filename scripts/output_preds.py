@@ -38,6 +38,12 @@ if __name__ == '__main__':
         "--model_type", default='bert', type=str, help="Type of model"
     )
     parser.add_argument(
+        '--model_name_or_path',
+        default='bert-base-uncased',
+        type=str,
+        help="Pretrained bert model used in training. Only require when model_type is 'bert_crf'."
+    )
+    parser.add_argument(
         "--task",
         default='i2b2_2014',
         type=str,
@@ -75,8 +81,9 @@ if __name__ == '__main__':
 
     # load in a trained model
     transformer = Transformer(
-        args.model_type, args.model_dir, max_seq_length=128, device='cpu'
+        args.model_type, args.model_dir, max_seq_length=128, device='cpu', bert_model_name_or_path=args.model_name_or_path
     )
+
     label_to_id = transformer.label_set.label_to_id
 
     data_path = Path(args.data_dir)
@@ -121,9 +128,15 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    entity_type = transformer.label_set.id_to_label[np.argmax(
-                        ex_preds[i, :]
-                    )]
+                    if args.model_type == 'bert_crf':
+                        assert(len(ex_preds[i,:]) == 1)
+                        # BertCRF gives one predicted tag id: (batch_size, max_seq_len, 1)
+                        entity_type = transformer.label_set.id_to_label[int(ex_preds[i,:][0])]
+                    else:
+                        entity_type = transformer.label_set.id_to_label[np.argmax(
+                            ex_preds[i, :]
+                        )]
+
                     # do not save object entity types
                     if entity_type == 'O':
                         continue

@@ -21,6 +21,7 @@ import glob
 import logging
 import os
 import random
+import json
 from functools import partial
 
 import numpy as np
@@ -41,6 +42,7 @@ from transformers import (
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
+    BertModel,
     CamembertConfig,
     CamembertForTokenClassification,
     CamembertTokenizer,
@@ -58,6 +60,9 @@ from transformers import (
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
+from bert_deid.BERT_CRF import BertCRF
+
+# PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
 try:
@@ -93,6 +98,7 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
+    "bert_crf": (BertConfig, BertModel, BertTokenizer)
 }
 
 
@@ -352,6 +358,12 @@ def argparser():
             f"{', '.join(_LABEL_TRANSFORMS)}"
         )
     )
+    parser.add_argument(
+        "--crf_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout rate for BERT-CRF"
+    )
 
     return parser
 
@@ -390,7 +402,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
         ) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    no_decay = ["bias", "LayerNorm.weight"]
+    # no_decay = ["bias", "LayerNorm.weight"]
+    no_decay = ['bias', 'LayerNorm.bias','LayerNorm.weight']
     optimizer_grouped_parameters = [
         {
             "params":
@@ -543,7 +556,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
             outputs = model(**inputs)
             loss = outputs[
                 0
-            ]  # model outputs are always tuple in pytorch-transformers (see doc)
+            ]  # model outputs are always tuple in pytorch-transformers (see doc) \
+               # also for BertCRF returns (negative log-likelihood, predicted tag seq)
 
             if args.n_gpu > 1:
                 loss = loss.mean(
@@ -580,12 +594,20 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                     if (
                         args.local_rank == -1 and args.evaluate_during_training
                     ):  # Only evaluate when single GPU otherwise metrics may not average well
+                        eval_dataset = load_and_cache_examples(
+                            args=args,
+                            tokenizer=tokenizer,
+                            processor=processor,
+                            pad_token_label_id=pad_token_label_id,
+                            mode='dev',
+                        )
                         results, _ = evaluate(
-                            args,
-                            model,
-                            tokenizer,
-                            processor,
-                            pad_token_label_id,
+                            args=args,
+                            eval_dataset=eval_dataset,
+                            model=model,
+                            tokenizer=tokenizer,
+                            processor=processor,
+                            pad_token_label_id=pad_token_label_id,
                             mode="dev"
                         )
                         for key, value in results.items():
@@ -649,11 +671,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
 
 
 def evaluate(
-    args, model, tokenizer, processor, pad_token_label_id, mode, prefix=""
+    args, eval_dataset, model, tokenizer, processor, pad_token_label_id, mode, prefix=""
 ):
-    eval_dataset = load_and_cache_examples(
-        args, tokenizer, processor, pad_token_label_id, mode=mode
-    )
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
@@ -699,17 +718,22 @@ def evaluate(
 
             eval_loss += tmp_eval_loss.item()
         nb_eval_steps += 1
+
+        logits = logits.detach().cpu().numpy()
+        if args.model_type == 'bert_crf':
+            logits = logits.astype(int)
         if preds is None:
-            preds = logits.detach().cpu().numpy()
+            preds = logits
             out_label_ids = inputs["labels"].detach().cpu().numpy()
         else:
-            preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+            preds = np.append(preds, logits, axis=0)
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0
             )
 
     eval_loss = eval_loss / nb_eval_steps
-    preds = np.argmax(preds, axis=2)
+    if args.model_type != 'bert_crf':
+        preds = np.argmax(preds, axis=2)
 
     labels = processor.label_set.label_list
     label_map = processor.label_set.label_to_id
@@ -781,7 +805,7 @@ def load_and_cache_examples(
             # cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
             pad_on_left=bool(args.model_type in ["xlnet"]),
             # pad on the left for xlnet
-            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+            pad_token=tokenizer.pad_token,
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
             pad_token_label_id=pad_token_label_id,
             feature_overlap=0.1
@@ -881,14 +905,11 @@ def main():
     label_set = LabelCollection(
         args.data_type, args.bio, transform=args.label_transform
     )
-    num_labels = len(label_set.label_list)
+    args.num_labels = len(label_set.label_list)
     processor = processors.DeidProcessor(
         args.data_dir,
         label_set
     )
-    # Use cross entropy ignore index as padding label id so
-    # that only real label ids contribute to the loss later
-    pad_token_label_id = CrossEntropyLoss().ignore_index
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
@@ -896,14 +917,13 @@ def main():
         # training will download model & vocab
         torch.distributed.barrier()
 
-    args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
 
     # interim vars
     config_name = args.config_name if args.config_name else args.model_name_or_path
     config = config_class.from_pretrained(
         config_name,
-        num_labels=num_labels,
+        num_labels=args.num_labels,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
 
@@ -921,6 +941,15 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
 
+    # label2id = processor.label_set.label_to_id
+    if args.model_type == 'bert_crf':
+        model = BertCRF(num_classes=args.num_labels, bert_model=model, device=args.device,dropout=args.crf_dropout)
+
+    # Use cross entropy ignore index as padding label id so
+    # that only real label ids contribute to the loss later
+    pad_token_label_id = CrossEntropyLoss().ignore_index
+
+
     if args.local_rank == 0:
         # Make sure only the first process in distributed training
         # will download model & vocab
@@ -933,7 +962,11 @@ def main():
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(
-            args, tokenizer, processor, pad_token_label_id, mode="train"
+            args=args, 
+            tokenizer=tokenizer, 
+            processor=processor, 
+            pad_token_label_id=pad_token_label_id,
+            mode="train", 
         )
         global_step, tr_loss = train(
             args, train_dataset, model, tokenizer, processor, pad_token_label_id
@@ -993,12 +1026,14 @@ def main():
                 global_step = ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
+            eval_dataset=load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode='val')
             result, _ = evaluate(
-                args,
-                model,
-                tokenizer,
-                processor,
-                pad_token_label_id,
+                args=args,
+                eval_dataset=eval_dataset,
+                model=model,
+                tokenizer=tokenizer,
+                processor=processor,
+                pad_token_label_id=pad_token_label_id,
                 mode="val",
                 prefix=global_step
             )
@@ -1019,8 +1054,15 @@ def main():
         )
         model = model_class.from_pretrained(args.output_dir)
         model.to(args.device)
+        test_dataset = load_and_cache_examples(args, tokenizer, processor, pad_token_label_id=pad_token_label_id,mode='test')
         result, predictions = evaluate(
-            args, model, tokenizer, processor, pad_token_label_id, mode="test"
+            args=args, 
+            eval_dataset=test_dataset,
+            model=model, 
+            tokenizer=tokenizer, 
+            processor=processor, 
+            pad_token_label_id=pad_token_label_id, 
+            mode="test"
         )
         # Save results
         output_test_results_file = os.path.join(

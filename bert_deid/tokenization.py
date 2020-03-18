@@ -266,12 +266,12 @@ def convert_examples_to_features(
     sep_token="[SEP]",
     sep_token_extra=False,
     pad_on_left=False,
-    pad_token=0,
+    pad_token="[PAD]",
     pad_token_segment_id=0,
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
     mask_padding_with_zero=True,
-    feature_overlap=None
+    feature_overlap=None,
 ):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
@@ -378,10 +378,11 @@ def convert_examples_to_features(
             # tokens are attended to.
             input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
 
+            pad_token_input_id = tokenizer.convert_tokens_to_ids([pad_token])[0]
             # Zero-pad up to the sequence length.
             padding_length = max_seq_length - len(input_ids)
             if pad_on_left:
-                input_ids = ([pad_token] * padding_length) + input_ids
+                input_ids = ([pad_token_input_id] * padding_length) + input_ids
                 input_mask = (
                     [0 if mask_padding_with_zero else 1] * padding_length
                 ) + input_mask
@@ -393,7 +394,7 @@ def convert_examples_to_features(
                 lengths = ([-1] * padding_length) + lengths
                 token_sw = ([False] * padding_length) + token_sw
             else:
-                input_ids += [pad_token] * padding_length
+                input_ids += [pad_token_input_id] * padding_length
                 input_mask += [
                     0 if mask_padding_with_zero else 1
                 ] * padding_length
