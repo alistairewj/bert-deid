@@ -4,8 +4,7 @@ import os
 import sys
 import logging
 
-# from nltk.tokenize import sent_tokenize
-from bert_deid.utils import create_hamonize_label_dict
+from bert_deid.label import Label, LabelCollection
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -13,78 +12,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-
-def load_labels(fn):
-    """Loads annotations from a CSV file with entity_type/start/stop columns."""
-    with open(fn, 'r') as fp:
-        csvreader = csv.reader(fp, delimiter=',', quotechar='"')
-        header = next(csvreader)
-        # identify which columns we want
-        idx = [
-            header.index('entity_type'),
-            header.index('start'),
-            header.index('stop')
-        ]
-
-        # iterate through the CSV and load in the labels as a list of tuples
-        #  (label name, start index, length of entity)
-        # e.g. labels = [('DATE', 36, 5), ('AGE', 45, 2)]
-        labels = [
-            (
-                row[idx[0]], int(row[idx[1]]),
-                int(row[idx[2]]) - int(row[idx[1]])
-            ) for row in csvreader
-        ]
-    
-    return labels
-
-def load_labels_string(fn):
-    """Loads annotations from a CSV file with entity_type/start/stop columns."""
-    with open(fn, 'r') as fp:
-        csvreader = csv.reader(fp, delimiter=',', quotechar='"')
-        header = next(csvreader)
-        # identify which columns we want
-        idx = [
-            header.index('entity_type'),
-            header.index('start'),
-            header.index('stop'), 
-            header.index('entity')
-        ]
-
-        # iterate through the CSV and load in the labels as a list of tuples
-        #  (label name, start index, length of entity)
-        # e.g. labels = [('DATE', 36, 5, 'entity'), ('AGE', 45, 2, 'entity')]
-        labels = [
-            (
-                row[idx[0]], int(row[idx[1]]),
-                int(row[idx[2]]) - int(row[idx[1]]), row[idx[3]]
-            ) for row in csvreader
-        ]
-    
-    return labels
-
-def label_transform(fn):
-    # transform label into BIO scheme, separate an entity on space and punctuation
-    # e.g. labels = [('B-DATE', 36, 2),('I-DATE',39,1)]
-    labels = load_labels_string(fn)
-    new_labels = []
-    for (entity_type, start, _, entity) in labels:
-        split_by_space = entity.split(" ")
-        is_first = True
-        for each_split in split_by_space:
-            split_by_punctuation = re.findall(r"\w+|[^\w\s]", each_split, re.UNICODE)
-            for word in split_by_punctuation:
-                if is_first:
-                    new_entity_type = "B-"+entity_type
-                    is_first = False
-                else:
-                    new_entity_type = "I-"+entity_type
-                new_labels.append((new_entity_type, start, len(word)))
-                start += len(word)
-            start += 1
-
-    return new_labels
 
 
 class InputExample(object):
@@ -106,21 +33,18 @@ class InputExample(object):
 
 class DataProcessor(object):
     """Base class for data converters."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir):
         """Initialize a data processor with the location of the data."""
         self.data_dir = data_dir
         self.data_filenames = None
-        self.label_list = None
-        self.label_transform = label_transform
+        self.label_set = None
 
     def get_labels(self):
         """Gets the list of labels for this data set."""
-        if self.label_list is None:
+        if not hasattr(self, 'label_set'):
             raise NotImplementedError()
-        if self.label_transform:
-            return ['O'] + ["B-"+l for l in self.label_list if l != 'O'] + ["I-"+l for l in self.label_list if l != 'O'] 
         else:
-            return list(self.label_list)
+            return list(self.label_set.label_list)
 
     def _create_examples(self, fn, mode):
         raise NotImplementedError()
@@ -167,7 +91,7 @@ class DataProcessor(object):
 
 class CoNLLProcessor(DataProcessor):
     """Processor for the gold standard de-id data set."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir, label_transform=None):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir, label_transform=label_transform)
         # conll2003 filenames
@@ -207,11 +131,7 @@ class CoNLLProcessor(DataProcessor):
                 s_len = 0
                 for j, l in enumerate(sentence):
                     # label_new = combine_labels[label[j]]
-                    if self.label_transform:
-                        # modify if needed later for CoNLL
-                        pass
-                    else:
-                        label_new = label[j]
+                    label_new = label[j]
 
                     label_offsets.append([label_new, s_len, len(l)])
                     # +1 to account for the whitespaces we insert below
@@ -241,10 +161,11 @@ class CoNLLProcessor(DataProcessor):
 
 class DeidProcessor(DataProcessor):
     """Processor for the de-id datasets."""
-    def __init__(self, data_dir, label_transform=False):
+    def __init__(self, data_dir, label_set):
         """Initialize a data processor with the location of the data."""
-        super().__init__(data_dir, label_transform=label_transform)
+        super().__init__(data_dir)
         self.data_filenames = {'train': 'train', 'test': 'test'}
+        self.label_set = label_set
 
     def _create_examples(self, fn, set_type):  # lines, set_type):
         """Creates examples for the training, validation, and test sets."""
@@ -265,167 +186,16 @@ class DeidProcessor(DataProcessor):
 
             # load in the annotations
             fn = os.path.join(ann_path, f'{f[:-4]}.gs')
-            if self.label_transform:
-                labels = label_transform(fn)
-            else:
-                labels = load_labels(fn)
-            examples.append(InputExample(guid=guid, text=text, labels=labels))
+
+            # load the labels from a file
+            # these datasets have consistent folder structures:
+            #   root_path/txt/RECORD_NAME.txt - has text
+            #   root_path/ann/RECORD_NAME.gs - has annotations
+            self.label_set.from_csv(fn)
+            examples.append(
+                InputExample(
+                    guid=guid, text=text, labels=self.label_set.labels
+                )
+            )
 
         return examples
-
-
-class i2b22006Processor(DeidProcessor):
-    """Processor for deid using i2b2 2006 dataset."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_list = (
-            # non-entities
-            'O',
-            # names
-            'DOCTOR',
-            'PATIENT',
-            # professions
-            'PROFESSION',
-            # locations
-            'LOCATION',
-            'HOSPITAL',
-            # ages
-            'AGE',
-            # dates
-            'DATE',
-            # IDs
-            'ID',
-            # contacts
-            'PHONE'
-        )
-
-
-class i2b22014Processor(DeidProcessor):
-    """Processor for deid using i2b2 2014 dataset."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_list = (
-            # non-entities
-            'O',
-            # names
-            'DOCTOR',
-            'PATIENT',
-            'USERNAME',
-            # professions
-            'PROFESSION',
-            # locations
-            'LOCATION',
-            'HOSPITAL',
-            'ORGANIZATION',
-            'URL',
-            'STREET',
-            'STATE',
-            'CITY',
-            'COUNTRY',
-            'ZIP',
-            'LOCATION-OTHER',
-            # ages
-            'AGE',
-            # dates
-            'DATE',
-            # IDs
-            'BIOID',
-            'DEVICE',
-            'HEALTHPLAN',
-            'IDNUM',
-            'MEDICALRECORD',
-            # contacts
-            'EMAIL',
-            'FAX',
-            'PHONE'
-        )
-
-
-class DernoncourtLeeProcessor(DeidProcessor):
-    """Processor for deid using Dernoncourt-Lee corpus."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_list = (
-            # non-entities
-            'O',
-            # names
-            'DOCTOR',
-            'PATIENT',
-            # professions
-            # locations
-            'HOSPITAL',
-            'STREET',
-            'STATE',
-            'COUNTRY',
-            'ZIP',
-            'LOCATION-OTHER',
-            # ages
-            'AGE',
-            # dates
-            'DATE',
-            # IDs
-            'IDNUM',
-            # contacts
-            'PHONE'
-        )
-
-
-class PhysioNetProcessor(DeidProcessor):
-    """Processor for deid using binary PHI/no phi labels."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_list = (
-            # non-entities
-            'O',
-            # names
-            'HCPNAME',
-            'RELATIVEPROXYNAME',
-            'PTNAME',
-            'PTNAMEINITIAL',
-            # professions
-            # locations
-            'LOCATION',
-            # ages
-            'AGE',
-            # dates
-            'DATE',
-            'DATEYEAR',
-            # IDs
-            'OTHER',
-            # contacts
-            'PHONE'
-        )
-
-
-class RRProcessor(DeidProcessor):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_list = (
-            # non-entities
-            'O',
-            # names
-            'NAME',
-            # professions
-            # locations
-            'PROTECTED_ENTITY',
-            'ORGANIZATION',
-            # ages
-            'AGE',
-            'AGE_>_89',
-            # dates
-            'DATE',
-            # IDs
-            'OTHER',
-            # contacts
-            'CONTACT'
-        )
-
-
-PROCESSORS = {
-    'conll': CoNLLProcessor,
-    'i2b2_2006': i2b22006Processor,
-    'i2b2_2014': i2b22014Processor,
-    'physionet': PhysioNetProcessor,
-    'dernoncourt_lee': DernoncourtLeeProcessor,
-    'rr': RRProcessor
-}

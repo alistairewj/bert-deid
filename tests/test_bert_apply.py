@@ -1,4 +1,3 @@
-from transformers import BertTokenizer
 from bert_deid.model import Transformer
 
 # load in a trained model

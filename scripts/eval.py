@@ -14,8 +14,7 @@ from tqdm import tqdm
 from collections import OrderedDict
 
 from bert_deid import processors
-
-PROCESSORS = processors.PROCESSORS
+from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
 
 """
 Runs BERT deid on a set of text files.
@@ -157,11 +156,6 @@ def main():
         help=("Extension for gold standard files in ref folder (default: gs)")
     )
 
-    parser.add_argument(
-        "--label_transform", action="store_true",
-        help="Whether labels are transformed using BIO"
-    )
-
 
     parser.add_argument(
         "--binary_eval", action="store_true",
@@ -185,8 +179,25 @@ def main():
         default=None,
         type=str,
         required=True,
-        choices=tuple(PROCESSORS.keys()),
-        help="The input dataset type. Valid choices: {}.".format(', '.join(PROCESSORS.keys())),
+        choices=LABEL_SETS,
+        help="The input dataset type. Valid choices: {}.".format(', '.join(LABEL_SETS)),
+    )
+
+    # label transformations
+    parser.add_argument(
+        "--bio",
+        action='store_true',
+        help="Whether to transform labels to use inside-outside-beginning tags"
+    )
+    _LABEL_TRANSFORMS = list(LABEL_MEMBERSHIP.keys())
+    parser.add_argument(
+        "--label_transform",
+        default=None,
+        choices=_LABEL_TRANSFORMS,
+        help=(
+            "Map labels using pre-coded transforms: "
+            f"{', '.join(_LABEL_TRANSFORMS)}"
+        )
     )
 
     parser.add_argument(
@@ -227,26 +238,14 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    labels = processors.PROCESSORS[args.data_type](None, False).get_labels()
-    labels = pd.DataFrame(labels, columns=["entity_type"])
-    labels = utils.combine_entity_types(labels, lowercase=True)
-    # remove 'o' object label
-    labels = labels['entity_type'].tolist()
-    labels.remove('o')
+    label_set = LabelCollection(
+        data_type=args.data_type, bio=None, transform=args.label_transform
+    )
+    # labels = tuple(label_set.label_list)
+    # labels.remove('O')
 
-    # construct label to id map
-    label2id_map = {}
-    for idx, label in enumerate(labels):
-        if not args.binary_eval and args.multi_eval:
-            label2id_map[label.lower()] = int(idx+1)
-
-        elif args.binary_eval and not args.multi_eval:
-            label2id_map[label.lower()] = 1
-        
-        else:
-            raise ValueError("Invalid argument inputs, either binary or multi class evaluation")
-        
-
+    # get the label to ID map from the label set
+    label2id_map = label_set.label_to_id
 
     # read files from folder
     if os.path.exists(args.text_path):
@@ -263,9 +262,9 @@ def main():
         raise ValueError('Input folder %s does not exist.', args.text_path)
 
     is_bio = ''
-    if args.label_transform:
+    if args.bio:
         is_bio += 'with BIO scheme transformation on label'
-    
+
     if args.binary_eval and not args.multi_eval:
         logger.info("***** Running binary evaluation {} *****".format(is_bio))
     elif args.multi_eval and not args.binary_eval:
@@ -280,7 +279,7 @@ def main():
     fn_all, fp_all = [], []
     perf_all = {}
     total_eval = 0
-    if args.label_transform:
+    if args.bio:
         fn_all_entity, fp_all_entity = [], []
     for fn in tqdm(input_files,total=len(input_files)):
         # load the text
@@ -303,26 +302,29 @@ def main():
             }
         )
 
-        gs = utils.combine_entity_types(gs, lowercase=True)
-        df = utils.combine_entity_types(df, lowercase=True)
-
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
         for i, row in gs.iterrows():
-            text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
+            if args.binary_eval:
+                text_tar[row['start']:row['stop']] = 1
+            else:
+                text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
         text_pred = np.zeros(len(text), dtype=int)
         for i, row in df.iterrows():
-            if args.label_transform:
-                if ('b-' not in row['entity_type'].lower() and 'i-' not in row['entity_type']):
-                    print ('type', row['entity_type'])
+            if args.bio:
+                if ('B-' not in row['entity_type'] and 'I-' not in row['entity_type']):
+                    print (f'type: {row["entity_type"]}')
                     raise ValueError("Invalid label transform arguments. Data prediction doesn't use BIO scheme.")
                 # assert ('b' in row['entity_type'].lower() or 'i' in row['entity_type'])
                 entity_type = row['entity_type'][2:] # remove b- or i-, don't care for char eval
             else:
-                if ('b-' in row['entity_type'].lower() or 'i-' in row['entity_type']):
-                    raise ValueError("Required --label_transform arg. Data prediction uses BIO scheme")
+                if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
+                    raise ValueError("Required --bio arg. Data prediction uses BIO scheme")
                 entity_type = row['entity_type']
-            text_pred[row['start']:row['stop']] = label2id_map[entity_type]
+            if args.binary_eval:
+                text_pred[row['start']:row['stop']] = 1
+            else:
+                text_pred[row['start']:row['stop']] = label2id_map[entity_type]
 
 
         curr_performance = {}
@@ -358,7 +360,7 @@ def main():
 
         fp_list_entity, fn_list_entity = None, None
         # report performance entity-wise (only when label is transformed)
-        if args.label_transform:
+        if args.bio:
             df = merge_BIO_pred(df, args.binary_eval, args.expand_eval, text)
             if args.binary_eval:
                 gs['entity_type'] = 'phi'
@@ -382,7 +384,7 @@ def main():
         if (log_path is not None) & (
             (curr_performance['n_token_fp'] > 0) |
             (curr_performance['n_token_fn'] > 0) |
-            (args.label_transform & (fn_list_entity is not None or fp_list_entity is not None))
+            (args.bio & (fn_list_entity is not None or fp_list_entity is not None))
         ):
 
             # print ("fn", fn)
@@ -392,9 +394,9 @@ def main():
                     false_list = fp_list
                 elif key == 'False Negatives Token': 
                     false_list = fn_list
-                elif key == 'False Positives Entity' and args.label_transform:
+                elif key == 'False Positives Entity' and args.bio:
                     false_list = fp_list_entity
-                elif key == 'False Negatives Entity' and args.label_transform:
+                elif key == 'False Negatives Entity' and args.bio:
                     false_list = fn_list_entity
                 else: 
                     false_list = []
@@ -430,25 +432,25 @@ def main():
 
     # summary stats
     se, ppv, f1 = utils.compute_stats(df, True, False)
-    print(f'Token Macro Se: {se.mean():0.3f}')
-    print(f'Token Macro P+: {ppv.mean():0.3f}')
-    print(f'Token Macro F1: {f1.mean():0.3f}')
+    print(f'Token Macro Se: {se.mean():0.4f}')
+    print(f'Token Macro P+: {ppv.mean():0.4f}')
+    print(f'Token Macro F1: {f1.mean():0.4f}')
 
     se, ppv, f1 = utils.compute_stats(df, True, True)
-    print(f'Token Micro Se: {se.mean():0.3f}')
-    print(f'Token Micro P+: {ppv.mean():0.3f}')
-    print(f'Token Micro F1: {f1.mean():0.3f}')
+    print(f'Token Micro Se: {se.mean():0.4f}')
+    print(f'Token Micro P+: {ppv.mean():0.4f}')
+    print(f'Token Micro F1: {f1.mean():0.4f}')
 
-    if args.label_transform:
+    if args.bio:
         se, ppv, f1 = utils.compute_stats(df, False, False)
-        print(f'Entity Macro Se: {se.mean():0.3f}')
-        print(f'Entity Macro P+: {ppv.mean():0.3f}')
-        print(f'Entity Macro F1: {f1.mean():0.3f}')
+        print(f'Entity Macro Se: {se.mean():0.4f}')
+        print(f'Entity Macro P+: {ppv.mean():0.4f}')
+        print(f'Entity Macro F1: {f1.mean():0.4f}')
 
         se, ppv, f1 = utils.compute_stats(df, False, True)
-        print(f'Entity Micro Se: {se.mean():0.3f}')
-        print(f'Entity Micro P+: {ppv.mean():0.3f}')
-        print(f'Entity Micro F1: {f1.mean():0.3f}')
+        print(f'Entity Micro Se: {se.mean():0.4f}')
+        print(f'Entity Micro P+: {ppv.mean():0.4f}')
+        print(f'Entity Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file

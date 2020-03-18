@@ -4,99 +4,10 @@ import re
 
 from sympy import Interval, Union
 from tqdm import tqdm
+import numpy as np
 import pandas as pd
-
-
-def create_hamonize_label_dict(grouping='i2b2'):
-    """Create a dictionary for mapping labels to standard categories."""
-    if grouping == 'i2b2':
-        # default harmonization is into i2b2 form
-        labels = [
-            ['NAME', ['NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
-                      'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
-            ['PROFESSION', ['PROFESSION']],
-            ['LOCATION', ['LOCATION', 'HOSPITAL', 'ORGANIZATION', 'URL',
-                          'STREET', 'STATE',
-                          'CITY', 'COUNTRY', 'ZIP', 'LOCATION-OTHER',
-                          'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                          'NATIONALITY']],
-            ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
-            ['DATE', ['DATE', 'DATEYEAR']],
-            ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
-                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
-                         'IPADDR', 'IPADDRESS']]
-        ]
-    elif grouping == 'hipaa':
-        labels = [
-            ['NAME', ['NAME', 'PATIENT', 'USERNAME',
-                      'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL']],
-            ['LOCATION', ['LOCATION', 'ORGANIZATION', 'HOSPITAL',
-                          'STREET', 'CITY', 'ZIP',
-                          'URL',
-                          'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                          'LOCATION-OTHER']],
-            ['AGE', ['AGE', 'AGE_>_89', 'AGE > 89']],
-            ['DATE', ['DATE', 'DATEYEAR']],
-            ['ID', ['BIOID', 'DEVICE', 'HEALTHPLAN',
-                    'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER']],
-            ['CONTACT', ['EMAIL', 'FAX', 'PHONE', 'CONTACT',
-                         # it is unclear whether these are HIPAA in i2b2 paper
-                         'IPADDR', 'IPADDRESS']],
-            ['O', ['DOCTOR', 'HCPNAME'
-                   'PROFESSION',
-                   'STATE', 'COUNTRY', 'NATIONALITY'
-                   ]]
-        ]
-    elif grouping == 'binary':
-        labels = [
-            ['PHI', ['NAME', 'PATIENT', 'USERNAME',
-                     'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL',
-                     'DOCTOR', 'HCPNAME',
-                     'LOCATION', 'ORGANIZATION', 'HOSPITAL',
-                     'PROTECTED_ENTITY', 'PROTECTED ENTITY',
-                     'LOCATION-OTHER',
-                     'STREET', 'CITY', 'ZIP',
-                     'STATE', 'COUNTRY',
-                     'NATIONALITY',
-                     # two URLs in i2b2 which aren't URLs but web service names
-                     'URL',
-                     'AGE', 'AGE_>_89', 'AGE > 89',
-                     'DATE', 'DATEYEAR',
-                     'BIOID', 'DEVICE', 'HEALTHPLAN',
-                     'IDNUM', 'MEDICALRECORD', 'ID', 'OTHER',
-                     'EMAIL', 'FAX', 'PHONE', 'CONTACT',
-                     'PROFESSION',
-                     'IPADDR', 'IPADDRESS']]
-            # , ['O', [ ]]
-        ]
-
-    else:
-        raise ValueError(f'Unrecognized grouping {grouping}')
-
-    label_to_type = {}
-    for label_map in labels:
-        for l in label_map[1]:
-            label_to_type[l] = label_map[0]
-
-    return label_to_type
-
-
-def harmonize_label(label, grouping='i2b2'):
-    """
-    Groups entities into one of the i2b2 2014 categories. Each dataset has a
-    slightly different set of entities. This harmonizes them.
-    Re-creates the mapping dictionary for each call.
-
-    Args:
-        label (str): label to be harmonized (e.g. 'USERNAME').
-
-    Returns:
-        harmonized (str): the harmonized label (e.g. 'NAME')..
-    """
-
-    label_to_type = create_hamonize_label_dict(grouping)
-    return label_to_type[label.upper()]
+import stanfordnlp
+import spacy
 
 
 def combine_entity_types(df, lowercase=True):
@@ -110,16 +21,13 @@ def combine_entity_types(df, lowercase=True):
 
     # coalesce pydeid types to types understood by the annotation tool
     # mainly this converts all name related labels to "Name"
-    type_dict = {'initials': 'Name',
-                 'firstname': 'Name',
-                 'lastname': 'Name'}
+    type_dict = {'initials': 'Name', 'firstname': 'Name', 'lastname': 'Name'}
     df['entity_type'] = df['entity_type'].apply(
-        lambda x: type_dict[x] if x in type_dict else x)
+        lambda x: type_dict[x] if x in type_dict else x
+    )
 
     # use the annotator name to infer the entity type
-    type_fix = {'wmrn': 'Identifier',
-                'name': 'Name',
-                'initials': 'Name'}
+    type_fix = {'wmrn': 'Identifier', 'name': 'Name', 'initials': 'Name'}
     for typ in type_fix:
         if 'annotator' in df.columns:
             idx = df['entity_type'].isnull() & \
@@ -142,11 +50,9 @@ def adjust_interval(interval):
     This is consistent with python indexing.
     """
     if interval.left_open:
-        interval = Interval(
-            interval.left + 1, interval.right)
+        interval = Interval(interval.left + 1, interval.right)
     if not interval.right_open:
-        interval = Interval(
-            interval.left, interval.right + 1, False, True)
+        interval = Interval(interval.left, interval.right + 1, False, True)
     return interval
 
 
@@ -171,8 +77,9 @@ def merge_intervals(df, dist=0, text=None):
     if df.shape[0] == 0:
         return df
 
-    df.sort_values(['document_id', 'entity_type',
-                    'start', 'stop'], inplace=True)
+    df.sort_values(
+        ['document_id', 'entity_type', 'start', 'stop'], inplace=True
+    )
     idx_merged = list()
     added_questions = set()
 
@@ -198,7 +105,7 @@ def merge_intervals(df, dist=0, text=None):
                 # add in ? if we have unknown characters
                 if update_stop < 0:
                     added_questions.add(idx_merged[-1])
-                    entity += '?'*-update_stop + row['entity']
+                    entity += '?' * -update_stop + row['entity']
                 else:
                     entity += row['entity'][update_stop:]
 
@@ -232,8 +139,10 @@ def merge_intervals(df, dist=0, text=None):
     if len(added_questions) > 0:
         if text is None:
             # warn the user that we added ?s for unknown characters
-            warnings.warn('Added ? characters to entities for unknown characters',
-                          category=RuntimeWarning)
+            warnings.warn(
+                'Added ? characters to entities for unknown characters',
+                category=RuntimeWarning
+            )
         else:
             # update entities with true characters
             for idx in added_questions:
@@ -305,8 +214,9 @@ def compare(goldstandard, comparison):
 
     # stack gold standard and annotations into the same dataframe
     comparison['annotation_id'] = comparison['annotator']
-    df = pd.concat([goldstandard[cols], comparison[cols]],
-                   ignore_index=True, axis=0)
+    df = pd.concat(
+        [goldstandard[cols], comparison[cols]], ignore_index=True, axis=0
+    )
 
     # delineate gold standard from annotation
     df['source'] = 'gs'
@@ -323,8 +233,10 @@ def compare(goldstandard, comparison):
     for grp_idx, grp in tqdm(df.groupby(group_names), total=n_groups):
         idxG = grp['source'] == 'gs'
         # create right-open intervals
-        cmp_intervals = [[x[0], x[1], False, True]
-                         for x in grp.loc[~idxG, ['start', 'stop']].values]
+        cmp_intervals = [
+            [x[0], x[1], False, True]
+            for x in grp.loc[~idxG, ['start', 'stop']].values
+        ]
         cmp_intervals = [Interval(*c) for c in cmp_intervals]
         cmp_intervals = Union(*cmp_intervals)
 
@@ -337,14 +249,16 @@ def compare(goldstandard, comparison):
             if mismatch.is_EmptySet:
                 span = '{} {}'.format(row['start'], row['stop'])
                 performance.append(
-                    [grp_idx, row['annotation_id'], 1, 0, 0, span])
+                    [grp_idx, row['annotation_id'], 1, 0, 0, span]
+                )
             # partial match
             else:
                 # no match
                 if mismatch == i:
                     span = '{} {}'.format(row['start'], row['stop'])
                     performance.append(
-                        [grp_idx, row['annotation_id'], 0, 0, 1, span])
+                        [grp_idx, row['annotation_id'], 0, 0, 1, span]
+                    )
                 else:
                     if type(mismatch) is Union:
                         # we have non-continuous segments in our mismatch
@@ -359,14 +273,15 @@ def compare(goldstandard, comparison):
                         span = '{} {}'.format(mismatch.left, mismatch.right)
 
                     performance.append(
-                        [grp_idx, row['annotation_id'], 0, 1, 0, span])
+                        [grp_idx, row['annotation_id'], 0, 1, 0, span]
+                    )
 
     # convert back to a dataframe with same index as gs
     performance = pd.DataFrame.from_records(
         performance,
-        columns=['document_id', 'annotation_id',
-                 'exact', 'partial', 'missed',
-                 'span']
+        columns=[
+            'document_id', 'annotation_id', 'exact', 'partial', 'missed', 'span'
+        ]
     )
     return performance
 
@@ -396,7 +311,8 @@ def compare_single_doc(gs, ann):
             for i, row in gs.iterrows():
                 span = '{} {}'.format(row['start'], row['stop'])
                 performance.append(
-                    [doc_id, row['annotation_id'], 0, 0, 1, span])
+                    [doc_id, row['annotation_id'], 0, 0, 1, span]
+                )
 
         # if ann.shape[0] == 0:
         #     # append ann rows as false positives
@@ -407,9 +323,10 @@ def compare_single_doc(gs, ann):
 
         performance = pd.DataFrame.from_records(
             performance,
-            columns=['document_id', 'annotation_id',
-                     'exact', 'partial', 'missed',
-                     'span']
+            columns=[
+                'document_id', 'annotation_id', 'exact', 'partial', 'missed',
+                'span'
+            ]
         )
         return performance
 
@@ -424,8 +341,9 @@ def compare_single_doc(gs, ann):
         doc_id = ann['document_id'].values[0]
 
     # create right-open intervals
-    cmp_intervals = [[x[0], x[1], False, True]
-                     for x in ann.loc[:, ['start', 'stop']].values]
+    cmp_intervals = [
+        [x[0], x[1], False, True] for x in ann.loc[:, ['start', 'stop']].values
+    ]
     cmp_intervals = [Interval(*c) for c in cmp_intervals]
     cmp_intervals = Union(*cmp_intervals)
 
@@ -437,15 +355,15 @@ def compare_single_doc(gs, ann):
         # exact match
         if mismatch.is_EmptySet:
             span = '{} {}'.format(row['start'], row['stop'])
-            performance.append(
-                [doc_id, row['annotation_id'], 1, 0, 0, span])
+            performance.append([doc_id, row['annotation_id'], 1, 0, 0, span])
         # partial match
         else:
             # no match
             if mismatch == i:
                 span = '{} {}'.format(row['start'], row['stop'])
                 performance.append(
-                    [doc_id, row['annotation_id'], 0, 0, 1, span])
+                    [doc_id, row['annotation_id'], 0, 0, 1, span]
+                )
             else:
                 if type(mismatch) is Union:
                     # we have non-continuous segments in our mismatch
@@ -460,14 +378,15 @@ def compare_single_doc(gs, ann):
                     span = '{} {}'.format(mismatch.left, mismatch.right)
 
                 performance.append(
-                    [doc_id, row['annotation_id'], 0, 1, 0, span])
+                    [doc_id, row['annotation_id'], 0, 1, 0, span]
+                )
 
     # convert back to a dataframe with same index as gs
     performance = pd.DataFrame.from_records(
         performance,
-        columns=['document_id', 'annotation_id',
-                 'exact', 'partial', 'missed',
-                 'span']
+        columns=[
+            'document_id', 'annotation_id', 'exact', 'partial', 'missed', 'span'
+        ]
     )
     return performance
 
@@ -482,8 +401,10 @@ def output_to_brat(doc_id, df, path, text=None):
             reset_annotations = True
         else:
             idx = df['annotation_id'].str.extract(r'(T[0-9]+)').values
-            idx = [idx[i] != df['annotation_id'].values[i]
-                   for i in range(df.shape[0])]
+            idx = [
+                idx[i] != df['annotation_id'].values[i]
+                for i in range(df.shape[0])
+            ]
             reset_annotations = any(idx)
 
         if reset_annotations:
@@ -513,7 +434,7 @@ def output_to_brat(doc_id, df, path, text=None):
 
             start = row['start'] + L
             stop = row['stop'] - R
-            txt = entity[L:len(entity)-R]
+            txt = entity[L:len(entity) - R]
 
             # brat does not like spaces in the type names
             typ = row['entity_type'].replace(' ', '_')
@@ -536,8 +457,7 @@ def output_to_brat(doc_id, df, path, text=None):
             #   T(ann #), tab, type/start/end, tab, string for reference
             # middle is a space-separated triple
             #   (type, start-offset, end-offset)
-            annotation = '{}\t{} {} {}\t{}\n'.format(
-                a, typ, start, stop, txt)
+            annotation = '{}\t{} {} {}\t{}\n'.format(a, typ, start, stop, txt)
             fp.write(annotation)
 
         t = max([int(x[1:]) for x in df['annotation_id']]) + 1
@@ -553,14 +473,16 @@ def output_to_brat(doc_id, df, path, text=None):
 
             for segment in segments:
                 ignore_partial, entity = suppress_partials(
-                    txt, segment, start, stop)
+                    txt, segment, start, stop
+                )
                 if ignore_partial:
                     continue
 
                 entity = entity.replace('\n', '\\n')
                 entity = entity.replace('\r', '\\r')
                 annotation = 'T{}\t{} {}\t{}\n'.format(
-                    t, 'p_missed', segment, entity)
+                    t, 'p_missed', segment, entity
+                )
                 fp.write(annotation)
                 t += 1
 
@@ -568,7 +490,8 @@ def output_to_brat(doc_id, df, path, text=None):
             txt = txt.replace('\n', '\\n')
             txt = txt.replace('\r', '\\r')
             annotation = 'T{}\t{} {} {}\t{}\n'.format(
-                t, 'missed', start, stop, txt)
+                t, 'missed', start, stop, txt
+            )
             fp.write(annotation)
             t += 1
 
@@ -584,7 +507,7 @@ def pattern_spans(text, pattern):
     offset = 0
     for token in tokens:
         offset = text.find(token, offset)
-        yield token, offset, offset+len(token)
+        yield token, offset, offset + len(token)
         offset += len(token)
 
 
@@ -601,8 +524,7 @@ def split_by_pattern(text, pattern):
     return tokens_with_spans
 
 
-def get_entity_token_context(df, text,
-                             context=3):
+def get_entity_token_context(df, text, context=3):
     """
     Given an annotation dataframe, get nearby tokens
 
@@ -630,8 +552,8 @@ def get_entity_token_context(df, text,
         # find the first span which is after this entity
         # x[0] is the index of the row
         span_left_idx = next(
-            (x[0] for x in text_split
-                if x[2] >= earliest_span_start), None)
+            (x[0] for x in text_split if x[2] >= earliest_span_start), None
+        )
 
         if span_left_idx is None:
             # there is no entity after this span
@@ -641,23 +563,23 @@ def get_entity_token_context(df, text,
             span_right_idx = text_split[-1][0]
         else:
             span_right_idx = next(
-                (x[0] for x in text_split
-                    if x[2] > last_span_stop), None)
+                (x[0] for x in text_split if x[2] > last_span_stop), None
+            )
             # span ends at the last token
             if span_right_idx is None:
                 span_right_idx = text_split[-1][0]
 
-        context_right = ['']*context
+        context_right = [''] * context
         # iterate through tokens on the right side of the span
         i = 0
-        for s in range(span_right_idx, span_right_idx+context):
+        for s in range(span_right_idx, span_right_idx + context):
             # ensure we do not go beyond the text
             if s < text_split[-1][0]:
                 # add word to context vector
                 context_right[i] = text_split[s][3]
             i += 1
 
-        context_left = ['']*context
+        context_left = [''] * context
         # iterate through tokens on the left side of the span
         i = -1
         for s in range(span_left_idx - 1, span_left_idx - context - 1, -1):
@@ -718,7 +640,7 @@ def get_entity_context(df, text, context=30, color=False):
         # start with context before the first span
         annotation.append(text[span_start:earliest_span_start])
         i = 0
-        while i < (len(spans)-1):
+        while i < (len(spans) - 1):
             # handle segments of entities
             s = spans[i]
             text_add = text[s[0]:s[1]]
@@ -728,7 +650,7 @@ def get_entity_context(df, text, context=30, color=False):
             annotation.append(text_add)
 
             # also add in text between two entities
-            next_span_start = spans[i+1][0]
+            next_span_start = spans[i + 1][0]
             annotation.append(text[s[1]:next_span_start])
             i += 1
 
@@ -754,37 +676,26 @@ def add_brat_conf_files(out_path):
     # check for annotations.conf, add it if it doesn't exist
     fn = os.path.join(out_path, 'annotation.conf')
     if not os.path.exists(fn):
-        annotations_conf = ['[entities]',
-                            'Age',
-                            'Name',
-                            'Date',
-                            'Identifier',
-                            'Location',
-                            'Organization',
-                            'Nationality',
-                            'Telephone',
-                            'Address',
-                            'Protected_Entity',
-                            'Contact',
-                            'p_missed',
-                            'missed',
-                            '',
-                            '[relations]',
-                            '[events]',
-                            '[attributes]'
-                            ]
+        annotations_conf = [
+            '[entities]', 'Age', 'Name', 'Date', 'Identifier', 'Location',
+            'Organization', 'Nationality', 'Telephone', 'Address',
+            'Protected_Entity', 'Contact', 'p_missed', 'missed', '',
+            '[relations]', '[events]', '[attributes]'
+        ]
         with open(fn, 'w') as fp:
             fp.write('\n'.join(annotations_conf))
 
     # specify how to display the annotations
     fn = os.path.join(out_path, 'visual.conf')
     if not os.path.exists(fn):
-        visual_conf = ['[labels]', '[drawing]',
-                       'SPAN_DEFAULT    fgColor:black, bgColor:lightgreen, borderColor:darken',
-                       'ARC_DEFAULT     color:black, dashArray:-, arrowHead:triangle-5',
-                       'p_missed bgColor:#ffff33',
-                       'missed bgColor:#e41a1c',
-                       ]
+        visual_conf = [
+            '[labels]',
+            '[drawing]',
+            'SPAN_DEFAULT    fgColor:black, bgColor:lightgreen, borderColor:darken',
+            'ARC_DEFAULT     color:black, dashArray:-, arrowHead:triangle-5',
+            'p_missed bgColor:#ffff33',
+            'missed bgColor:#e41a1c',
+        ]
         with open(fn, 'w') as fp:
             fp.write('\n'.join(visual_conf))
 
@@ -793,7 +704,6 @@ def add_brat_conf_files(out_path):
         tools_conf = ['[options]', 'Sentences	splitter:newline']
         with open(fn, 'w') as fp:
             fp.write('\n'.join(tools_conf))
-
 
 
 def split_by_token_entity(text, entities, start):
@@ -809,15 +719,15 @@ def split_by_token_entity(text, entities, start):
         if entities[i] != prev_type:
             token = text[offset:i]
             tokens.append(token)
-            starts.append(offset+start)
-            ends.append(offset+len(token)+start)
-            
+            starts.append(offset + start)
+            ends.append(offset + len(token) + start)
+
             offset += len(token)
             prev_type = entities[i]
     last_token = text[offset:len(text)]
     tokens.append(last_token)
-    starts.append(offset+start)
-    ends.append(offset+len(last_token)+start)
+    starts.append(offset + start)
+    ends.append(offset + len(last_token) + start)
     return tokens, starts, ends
 
 
@@ -827,8 +737,8 @@ def split_by_space(text):
     """
     offset = 0
     for token in text.split():
-        offset = text.find(token,offset)
-        yield token, offset, offset+len(token)
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
         offset += len(token)
 
 
@@ -838,28 +748,34 @@ def compute_stats(df, is_token, is_micro):
     """
     type_eval = 'n_'
     if is_token:
-        type_eval+='token_'
+        type_eval += 'token_'
     else:
-        type_eval+='entity_'
-    
-    tp = df[type_eval+'tp']
-    fp = df[type_eval+'fp']
-    fn = df[type_eval+'fn']
+        type_eval += 'entity_'
+
+    tp = df[type_eval + 'tp']
+    fp = df[type_eval + 'fp']
+    fn = df[type_eval + 'fn']
     if is_micro:
         tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
-    se = tp/(tp+fn)
-    ppv = tp/(tp+fp)
-    f1 = 2*se*ppv/(se+ppv)
+    se = tp / (tp + fn)
+    ppv = tp / (tp + fp)
+    f1 = 2 * se * ppv / (se + ppv)
     return se, ppv, f1
+
 
 def get_entities(data):
     """
     Get PHI entities (entity, entity type, start, stop) from dataframe
     """
-    entities = [(data['entity'].iloc[i], data['entity_type'].iloc[i].lower(),
-    data['start'].iloc[i], data['stop'].iloc[i]) for i in range(len(data))]
+    entities = [
+        (
+            data['entity'].iloc[i], data['entity_type'].iloc[i].lower(),
+            data['start'].iloc[i], data['stop'].iloc[i]
+        ) for i in range(len(data))
+    ]
 
     return entities
+
 
 def ignore_partials(phis):
     """
@@ -880,3 +796,235 @@ def ignore_partials(phis):
         new_phis.append((entity, entity_type, start, stop))
     return new_phis
 
+
+def split_iterator(pattern, text):
+    """
+    Iterator that splits text using a regex pattern.
+    
+    Returns
+    -------
+    token, start, stop
+        Tuple containing the token, the start index of the token
+        in the original string, and the end index of the
+    """
+
+    tokens = pattern.split(text)
+
+    offset = 0
+    for token in tokens:
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
+        offset += len(token)
+
+
+def split_with_offsets(pattern, text):
+    """
+    Function that wraps the pattern span iterator.
+    """
+    tokens_with_spans = list()
+    for token, start, end in split_iterator(pattern, text):
+        tokens_with_spans.append([start, end, token])
+
+    return tokens_with_spans
+
+
+def mode(values, ignore_value=None):
+    """Get the most frequent value, ignoring a specified value if desired."""
+    if len(values) == 0:
+        raise ValueError('Cannot calculate mode of length 0 array.')
+
+    p_unique, p_counts = np.unique(values, return_counts=True)
+    # remove our ignore index
+    if ignore_value is not None:
+        idx = np.where(p_unique == ignore_value)[0]
+        if len(idx) > 0:
+            # we know p_unique is unique, so delete the only element of idx
+            p_unique = np.delete(p_unique, idx[0])
+            p_counts = np.delete(p_counts, idx[0])
+
+    return p_unique[np.argmax(p_counts)]
+
+
+def expand_id_to_token(token_pred, ignore_value=None):
+    # get most frequent label_id for this token
+    p_unique, p_counts = np.unique(token_pred, return_counts=True)
+
+    if len(p_unique) <= 1:
+        return token_pred
+
+    # remove our ignore index
+    if ignore_value is not None:
+        idx = np.where(p_unique == ignore_value)[0]
+        if len(idx) > 0:
+            # we know p_unique is unique, so get the only element
+            p_unique = np.delete(p_unique, idx[0])
+            p_counts = np.delete(p_counts, idx[0])
+
+    if len(p_unique) == 1:
+        idx = 0
+    else:
+        # TODO: warn user if we broke a tie by taking lowest ID
+        idx = np.argmax(p_counts)
+
+    # re-create the array with only the most frequent label
+    token_pred = np.ones(len(token_pred), dtype=int) * p_unique[idx]
+    return token_pred
+
+
+def tokenize_text(tokenizer, text):
+    """Split text into tokens using the given tokenizer."""
+    if isinstance(tokenizer, stanfordnlp.pipeline.core.Pipeline):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens = [
+            token.text for sentence in doc.sentences
+            for token in sentence.tokens
+        ]
+    elif isinstance(tokenizer, spacy.tokenizer.Tokenizer):
+        doc = tokenizer(text)
+        # extract tokens from the parsed text
+        tokens = [token.text for token in doc]
+    else:
+        if tokenizer is None:
+            tokenizer = '\w'
+        # treat string as a regex
+        tokens = re.findall(tokenizer, text)
+    return tokens
+
+
+def generate_token_arrays(
+    text,
+    text_tar,
+    text_pred,
+    tokenizer=None,
+    expand_predictions=True,
+    split_true_entities=True,
+    ignore_value=None
+):
+    """
+    Evaluate performance of prediction labels compared to ground truth.
+
+
+    Args
+        text_tar - N length numpy array with integers for ground truth labels
+        text_pred - N length numpy array with integers for predicted labels
+        tokenizer - Determines the granularity level of the evaluation.
+            None or '' - character-wise evaluation
+            r'\w' - word-wise evaluation
+        expand_predictions - If a prediction is partially made for a
+            token, expand it to cover the entire token. If not performed,
+            then partially labeled tokens are treated as missed detections.
+        split_true_entities - The ground truth label for a single token
+            may correspond to two distinct classes (e.g. if word splitting,
+            John/2010 would be one token but have two ground truth labels).
+            Enabling this argument splits these tokens.
+        ignore_value - Ignore a label_id in the evaluation. Useful for ignoring
+            the 'other' category.
+    """
+    tokens_base = tokenize_text(tokenizer, text)
+
+    tokens = []
+    tokens_pred = []
+    tokens_true = []
+    tokens_start, tokens_length = [], []
+
+    n_tokens = 0
+
+    start = 0
+    for token in tokens_base:
+        # sometimes we have empty tokens on their own
+        if len(token) == 0:
+            continue
+        start = text.find(token, start)
+        token_true = text_tar[start:start + len(token)]
+        token_pred = text_pred[start:start + len(token)]
+
+        if all(token_true == -1) & all(token_pred == -1):
+            # skip tokens which are not labeled
+            start += len(token)
+            n_tokens += 1
+            continue
+
+        if split_true_entities:
+            # split the single token into subtokens, based on the true entity
+            idxDiff = np.diff(token_true, prepend=0)
+            if any(idxDiff > 0):
+                # split
+                idxDiff = np.diff(token_true, prepend=0)
+                subtok_start = 0
+                subtoken_true, subtoken_pred = [], []
+                for subtok_end in np.where(idxDiff > 0)[0]:
+                    subtoken_true.append(token_true[subtok_start:subtok_end])
+                    subtoken_pred.append(token_pred[subtok_start:subtok_end])
+                    subtok_start = subtok_end
+                if subtok_end < len(token_true):
+                    # add final token
+                    subtoken_true.append(token_true[subtok_start:])
+                    subtoken_pred.append(token_pred[subtok_start:])
+            else:
+                # in this case, there is only 1 label_id for the entire token
+                # so we can just wrap in a list for the iterator later
+                subtoken_true = [token_true]
+                subtoken_pred = [token_pred]
+        else:
+            # do not split a token if there is more than 1 ground truth
+            # consequently, tokens with multiple labels will be treated
+            # as equal to the most frequent label
+            subtoken_true = [token_true]
+            subtoken_pred = [token_pred]
+
+        # now iterate through our sub-tokens
+        # often this is a length 1 iterator
+        for token_true, token_pred in zip(subtoken_true, subtoken_pred):
+            if len(token_true) == 0:
+                continue
+
+            if expand_predictions:
+                # expand the most frequent ID to cover the entire token
+                token_pred = expand_id_to_token(token_pred, ignore_value=-1)
+                token_true = expand_id_to_token(token_true, ignore_value=-1)
+
+            # get the length of the token for later
+            token_len = len(token_true)
+
+            # aggregate IDs for this token into the most frequent value
+            if len(token_true) == 0:
+                token_true = -1
+            else:
+                token_true = mode(token_true, ignore_value)
+            if len(token_pred) == 0:
+                token_pred = -1
+            else:
+                token_pred = mode(token_pred, ignore_value)
+
+            # append the prediction for this token
+            tokens_true.append(token_true)
+            tokens_pred.append(token_pred)
+            tokens.append(text[start:start + token_len])
+            tokens_start.append(start)
+            tokens_length.append(token_len)
+
+            start += token_len
+            # keep track of total tokens assessed
+            n_tokens += 1
+
+    # now we have a list of tokens with preds
+    tokens_true = np.asarray(tokens_true, dtype=int)
+    tokens_pred = np.asarray(tokens_pred, dtype=int)
+
+    return tokens_true, tokens_pred, tokens, tokens_start, tokens_length
+
+
+def get_characterwise_labels(label_set, text):
+    """
+    Given a label collections, outputs an integer vector with the label_id.
+    
+    Integer vectors are the same length as the text.
+    """
+    # integer vector indicating truth
+    label_ids = -1 * np.ones(len(text), dtype=int)
+    for label in label_set.labels:
+        label_ids[label.start:label.start +
+                  label.length] = label_set.label_to_id[label.entity_type]
+
+    return label_ids

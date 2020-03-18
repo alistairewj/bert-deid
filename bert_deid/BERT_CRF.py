@@ -1,8 +1,10 @@
 import torch
-from torchcrf import CRF
+# from torchcrf import CRF
+from bert_deid.crf import CRF
 from torch import nn
 import os
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 WEIGHTS_NAME= "pytorch_model.bin"
@@ -13,6 +15,7 @@ class BertCRF(nn.Module):
         super(BertCRF, self).__init__()
 
         self.bert = bert_model
+        self.num_classes = num_classes
         self.dropout = nn.Dropout(dropout)
         self.hidden2label = nn.Linear(hidden_size, num_classes)
         self.device = device
@@ -25,16 +28,26 @@ class BertCRF(nn.Module):
         outputs = self.bert(input_ids=input_ids,
                             token_type_ids=token_type_ids,
                             attention_mask=attention_mask)
-
-        last_encoder_layer = outputs[0]
+       
+        last_encoder_layer = outputs[0] # (batch_size, seq_length, hidden_size)
+        batch_size, seq_len = last_encoder_layer.shape[:2]
+        # mask all -100
+        mask = (labels >=0).long()
+        # torchCRF library assume no special tokens [cls] [sep] at either front of end of sequence
+        last_encoder_layer = last_encoder_layer[:,1:-1,:]
+        # update all -100 to 0
+        labels = labels[:, 1:-1] * mask[:, 1:-1]
+        mask = mask[:, 1:-1].byte()
+        
         last_encoder_layer = self.dropout(last_encoder_layer)
         emissions = self.hidden2label(last_encoder_layer).to(self.device)
 
         if labels is not None:
-            log_likelihood, tag_seqs = self.crf(emissions, labels), torch.Tensor(self.crf.decode(emissions)).to(self.device)
+            log_likelihood = self.crf(emissions=emissions, tags=labels, mask=mask)
+            tag_seqs = torch.Tensor(self.crf.decode(emissions, mask=mask)).to(self.device)# (batch_size, seq_len)
             return -1*log_likelihood, tag_seqs
         else:
-            tag_seqs = torch.Tensor(self.crf.decode(emissions)).to(self.device)
+            tag_seqs = torch.Tensor(self.crf.decode(emissions, mask=mask)).to(self.device)
             return None, tag_seqs
 
     def save_pretrained(self, save_dir):

@@ -1,6 +1,7 @@
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020, Alistair Johnson.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Fine-tuning the library models for named entity recognition on CoNLL-2003 (Bert or Roberta). """
+"""Train a de-identification model using BERT based models."""
 
 import argparse
 import glob
@@ -21,16 +22,14 @@ import logging
 import os
 import random
 import json
+from functools import partial
 
 import numpy as np
 import torch
 from seqeval.metrics import f1_score, precision_score, recall_score
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import (
-    DataLoader,
-    RandomSampler,
-    SequentialSampler,
-    TensorDataset
+    DataLoader, RandomSampler, SequentialSampler, TensorDataset
 )
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
@@ -38,7 +37,8 @@ from tqdm import tqdm, trange
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
-    AlbertConfig, AlbertTokenizer,
+    AlbertConfig,
+    AlbertTokenizer,
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
@@ -62,7 +62,8 @@ from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
 from bert_deid.BERT_CRF import BertCRF
 
-PROCESSORS = processors.PROCESSORS
+# PROCESSORS = processors.PROCESSORS
+from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -110,32 +111,41 @@ def argparser():
         default=None,
         type=str,
         required=True,
-        help=
-        "The input data dir. Should contain the training files for the CoNLL-2003 NER task.",
+        help=(
+            "The input data dir. Should contain the training "
+            "files for the NER task."
+        ),
     )
     parser.add_argument(
         "--data_type",
         default=None,
         type=str,
         required=True,
-        choices=tuple(PROCESSORS.keys()),
-        help="The input dataset type. Valid choices: {}.".format(', '.join(PROCESSORS.keys())),
+        choices=LABEL_SETS,
+        help=(
+            "The input dataset type. "
+            "Valid choices: {}.".format(', '.join(LABEL_SETS))
+        ),
     )
     parser.add_argument(
         "--model_type",
         default=None,
         type=str,
         required=True,
-        help="Model type selected in the list: " +
-        ", ".join(MODEL_CLASSES.keys()),
+        help=(
+            "Model type selected in the list: "
+            ", ".join(MODEL_CLASSES.keys())
+        ),
     )
     parser.add_argument(
         "--model_name_or_path",
         default=None,
         type=str,
         required=True,
-        help="Path to pre-trained model or shortcut name selected in the list: "
-        + ", ".join(ALL_MODELS),
+        help=(
+            "Path to pre-trained model or shortcut "
+            f"name selected in the list: {', '.join(ALL_MODELS)}"
+        ),
     )
     parser.add_argument(
         "--output_dir",
@@ -170,9 +180,11 @@ def argparser():
         "--max_seq_length",
         default=128,
         type=int,
-        help=("The maximum total input sequence length after tokenization. "
-              "Sequences longer than this will be truncated, shorter sequences "
-              "will be padded."),
+        help=(
+            "The maximum total input sequence length after tokenization. "
+            "Sequences longer than this will be truncated, shorter sequences "
+            "will be padded."
+        ),
     )
     parser.add_argument(
         "--do_train", action="store_true", help="Whether to run training."
@@ -214,8 +226,10 @@ def argparser():
         "--gradient_accumulation_steps",
         type=int,
         default=1,
-        help=("Number of updates steps to accumulate before "
-              "performing a backward/update pass."),
+        help=(
+            "Number of updates steps to accumulate before "
+            "performing a backward/update pass."
+        ),
     )
     parser.add_argument(
         "--learning_rate",
@@ -248,8 +262,10 @@ def argparser():
         "--max_steps",
         default=-1,
         type=int,
-        help=("If > 0: set total number of training steps to perform. "
-              "Overrides num_train_epochs."),
+        help=(
+            "If > 0: set total number of training steps to perform. "
+            "Overrides num_train_epochs."
+        ),
     )
     parser.add_argument(
         "--warmup_steps",
@@ -267,14 +283,16 @@ def argparser():
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=50,
+        default=500,
         help="Save checkpoint every X updates steps."
     )
     parser.add_argument(
         "--eval_all_checkpoints",
         action="store_true",
-        help=("Evaluate all checkpoints starting with the same prefix "
-              "as model_name ending and ending with step number"),
+        help=(
+            "Evaluate all checkpoints starting with the same prefix "
+            "as model_name ending and ending with step number"
+        ),
     )
     parser.add_argument(
         "--no_cuda",
@@ -298,16 +316,20 @@ def argparser():
     parser.add_argument(
         "--fp16",
         action="store_true",
-        help=("Whether to use 16-bit (mixed) precision (through NVIDIA apex) "
-              "instead of 32-bit"),
+        help=(
+            "Whether to use 16-bit (mixed) precision (through NVIDIA apex) "
+            "instead of 32-bit"
+        ),
     )
     parser.add_argument(
         "--fp16_opt_level",
         type=str,
         default="O1",
-        help=("For fp16: Apex AMP optimization level selected in "
-              "['O0', 'O1', 'O2', and 'O3']. "
-              "See details at https://nvidia.github.io/apex/amp.html"),
+        help=(
+            "For fp16: Apex AMP optimization level selected in "
+            "['O0', 'O1', 'O2', and 'O3']. "
+            "See details at https://nvidia.github.io/apex/amp.html"
+        ),
     )
     parser.add_argument(
         "--local_rank",
@@ -322,8 +344,19 @@ def argparser():
         "--server_port", type=str, default="", help="For distant debugging."
     )
     parser.add_argument(
-        "--label_transform", action="store_true",
-        help="Whether labels are transformed using BIO"
+        "--bio",
+        action='store_true',
+        help="Whether to transform labels to use inside-outside-beginning tags"
+    )
+    _LABEL_TRANSFORMS = list(LABEL_MEMBERSHIP.keys())
+    parser.add_argument(
+        "--label_transform",
+        default=None,
+        choices=_LABEL_TRANSFORMS,
+        help=(
+            "Map labels using pre-coded transforms: "
+            f"{', '.join(_LABEL_TRANSFORMS)}"
+        )
     )
     parser.add_argument(
         "--crf_dropout",
@@ -334,6 +367,7 @@ def argparser():
 
     return parser
 
+
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -342,7 +376,7 @@ def set_seed(args):
         torch.cuda.manual_seed_all(args.seed)
 
 
-def train(args, train_dataset, model, tokenizer, processor, label2id):
+def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         tb_writer = SummaryWriter()
@@ -417,7 +451,10 @@ def train(args, train_dataset, model, tokenizer, processor, label2id):
             from apex import amp
         except ImportError:
             raise ImportError(
-                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training."
+                (
+                    "Please install apex from https://www.github.com/nvidia/apex "
+                    "to use fp16 training."
+                )
             )
         model, optimizer = amp.initialize(
             model, optimizer, opt_level=args.fp16_opt_level
@@ -459,8 +496,12 @@ def train(args, train_dataset, model, tokenizer, processor, label2id):
     # Check if continuing training from a checkpoint
     if os.path.exists(args.model_name_or_path):
         # set global_step to gobal_step of last saved checkpoint from model path
-        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
-        # global_step = 0
+        global_step = args.model_name_or_path.split("-")[-1].split("/")[0]
+        if global_step == '':
+            global_step = 0
+        else:
+            global_step = int(global_step)
+
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps
         )
@@ -557,8 +598,8 @@ def train(args, train_dataset, model, tokenizer, processor, label2id):
                             args=args,
                             tokenizer=tokenizer,
                             processor=processor,
+                            pad_token_label_id=pad_token_label_id,
                             mode='dev',
-                            label2id=label2id
                         )
                         results, _ = evaluate(
                             args=args,
@@ -566,7 +607,7 @@ def train(args, train_dataset, model, tokenizer, processor, label2id):
                             model=model,
                             tokenizer=tokenizer,
                             processor=processor,
-                            label2id=label2id,
+                            pad_token_label_id=pad_token_label_id,
                             mode="dev"
                         )
                         for key, value in results.items():
@@ -630,7 +671,7 @@ def train(args, train_dataset, model, tokenizer, processor, label2id):
 
 
 def evaluate(
-    args, eval_dataset, model, tokenizer, processor, label2id, mode, prefix=""
+    args, eval_dataset, model, tokenizer, processor, pad_token_label_id, mode, prefix=""
 ):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
@@ -694,21 +735,20 @@ def evaluate(
     if args.model_type != 'bert_crf':
         preds = np.argmax(preds, axis=2)
 
-    special_tokens = [tokenizer.pad_token, tokenizer.cls_token, tokenizer.sep_token]
-    special_tokens_id = set([label2id[token] for token in special_tokens]) # takes care multiple -100 for original bert
 
-    id2label = {}
-    for label in label2id.keys():
-        id2label[label2id[label]] = label 
+    labels = processor.label_set.label_list
+    label_map = processor.label_set.label_to_id
+    # invert the mapping from label to ID
+    label_map = {i: label for label, i in label_map.items()}
 
     out_label_list = [[] for _ in range(out_label_ids.shape[0])]
     preds_list = [[] for _ in range(out_label_ids.shape[0])]
 
     for i in range(out_label_ids.shape[0]):
         for j in range(out_label_ids.shape[1]):
-            if out_label_ids[i, j] not in special_tokens_id:
-                out_label_list[i].append(id2label[out_label_ids[i][j]])
-                preds_list[i].append(id2label[preds[i][j]])
+            if out_label_ids[i, j] != pad_token_label_id:
+                out_label_list[i].append(label_map[out_label_ids[i][j]])
+                preds_list[i].append(label_map[preds[i][j]])
 
     results = {
         "loss": eval_loss,
@@ -725,23 +765,20 @@ def evaluate(
 
 
 def load_and_cache_examples(
- args,
- tokenizer,
- processor,
- mode,
- label2id   
-): 
+    args, tokenizer, processor, pad_token_label_id, mode
+):
     if args.local_rank not in [-1, 0] and not evaluate:
-        torch.distributed.barrier(
-        )  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+        # Make sure only the first process in distributed
+        # training process the dataset, and the others will use the cache
+        torch.distributed.barrier()
 
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
         args.data_dir,
-        "cached_{}_{}_{}".format(
+        "cached_{}_{}_{}_{}".format(
             mode,
             list(filter(None, args.model_name_or_path.split("/"))).pop(),
-            str(args.max_seq_length)
+            str(args.max_seq_length), processor.label_set.__name__
         ),
     )
 
@@ -756,23 +793,22 @@ def load_and_cache_examples(
         examples = processor.get_examples(mode)
         features = tokenization.convert_examples_to_features(
             examples,
-            label2id,
+            processor.label_set.label_to_id,
             args.max_seq_length,
             tokenizer,
             cls_token_at_end=bool(args.model_type in ["xlnet"]),
             # xlnet has a cls token at the end
             cls_token=tokenizer.cls_token,
-            cls_token_label_id=label2id[tokenizer.cls_token],
             cls_token_segment_id=2 if args.model_type in ["xlnet"] else 0,
             sep_token=tokenizer.sep_token,
-            sep_token_label_id=label2id[tokenizer.sep_token],
             sep_token_extra=bool(args.model_type in ["roberta"]),
-            # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
+            # roberta uses an extra separator b/w pairs of sentences
+            # cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
             pad_on_left=bool(args.model_type in ["xlnet"]),
             # pad on the left for xlnet
             pad_token=tokenizer.pad_token,
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
-            pad_token_label_id=label2id[tokenizer.pad_token],
+            pad_token_label_id=pad_token_label_id,
             feature_overlap=0.1
         )
         if args.local_rank in [-1, 0]:
@@ -782,8 +818,9 @@ def load_and_cache_examples(
             torch.save(features, cached_features_file)
 
     if args.local_rank == 0 and not evaluate:
-        torch.distributed.barrier(
-        )  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+        # Make sure only the first process in distributed training process
+        # the dataset, and the others will use the cache
+        torch.distributed.barrier()
 
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor(
@@ -814,13 +851,16 @@ def main():
         args.do_train and not args.overwrite_output_dir
     ):
         raise ValueError(
-            "Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome."
-            .format(args.output_dir)
+            (
+                f"Output directory ({args.output_dir}) already exists and "
+                "is not empty. Use --overwrite_output_dir to overcome."
+            )
         )
 
     # Setup distant debugging if needed
     if args.server_ip and args.server_port:
-        # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
+        # Distant debugging
+        # see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
 
         print("Waiting for debugger attach")
@@ -835,7 +875,9 @@ def main():
             "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
         )
         args.n_gpu = torch.cuda.device_count()
-    else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    else:
+        # Initializes the distributed backend which will
+        # take care of sychronizing nodes/GPUs
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl")
@@ -861,12 +903,14 @@ def main():
     set_seed(args)
 
     # Prepare the task
-    processor = PROCESSORS[args.data_type](args.data_dir, args.label_transform)
-    label_list = processor.get_labels()
-    num_labels = len(label_list)+3 # account for [CLS], [SEP], [PAD] special tokens
-    args.model_type = args.model_type.lower()
-    # if args.model_type == 'bert_crf':
-    #     num_labels += 3 # additional labels: [CLS], [SEP], [PAD] in emission matrix
+    label_set = LabelCollection(
+        args.data_type, args.bio, transform=args.label_transform
+    )
+    args.num_labels = len(label_set.label_list)
+    processor = processors.DeidProcessor(
+        args.data_dir,
+        label_set
+    )
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
@@ -875,16 +919,22 @@ def main():
         torch.distributed.barrier()
 
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
+
+    # interim vars
+    config_name = args.config_name if args.config_name else args.model_name_or_path
     config = config_class.from_pretrained(
-        args.config_name if args.config_name else args.model_name_or_path,
-        num_labels=num_labels,
+        config_name,
+        num_labels=args.num_labels,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
+
+    tokenizer_name = args.tokenizer_name if args.tokenizer_name else args.model_name_or_path
     tokenizer = tokenizer_class.from_pretrained(
-        args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+        tokenizer_name,
         do_lower_case=args.do_lower_case,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
+
     model = model_class.from_pretrained(
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
@@ -892,24 +942,13 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
 
+    # label2id = processor.label_set.label_to_id
     if args.model_type == 'bert_crf':
-        model = BertCRF(num_classes=num_labels, bert_model=model, device=args.device,dropout=args.crf_dropout)
-        label2id = {'O': 0, tokenizer.cls_token: 1, tokenizer.sep_token: 2, tokenizer.pad_token:3}
-    else:
-        # special tokens all -100
-        # Use cross entropy ignore index as padding label id so
-        # that only real label ids contribute to the loss later
-        special_token_id = CrossEntropyLoss().ignore_index
-        label2id = {'O':0, tokenizer.cls_token: special_token_id, tokenizer.sep_token: special_token_id, tokenizer.pad_token: special_token_id}
+        model = BertCRF(num_classes=args.num_labels, bert_model=model, device=args.device,dropout=args.crf_dropout)
 
-    
-    for label in label_list:
-        if label.upper() != 'O':
-            label2id[label] = len(label2id)
-
-    with open(os.path.join(args.output_dir, 'label2id.json'), 'w') as f:
-        json.dump(label2id, f, indent=4)
-    
+    # Use cross entropy ignore index as padding label id so
+    # that only real label ids contribute to the loss later
+    pad_token_label_id = CrossEntropyLoss().ignore_index
 
 
     if args.local_rank == 0:
@@ -927,11 +966,11 @@ def main():
             args=args, 
             tokenizer=tokenizer, 
             processor=processor, 
+            pad_token_label_id=pad_token_label_id,
             mode="train", 
-            label2id=label2id
         )
         global_step, tr_loss = train(
-            args, train_dataset, model, tokenizer, processor, label2id
+            args, train_dataset, model, tokenizer, processor, pad_token_label_id
         )
         logger.info(
             " global_step = %s, average loss = %s", global_step, tr_loss
@@ -959,6 +998,9 @@ def main():
         # save training arguments together with the trained model
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
+        # save label set
+        torch.save(label_set, os.path.join(args.output_dir, "label_set.bin"))
+
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
@@ -979,18 +1021,20 @@ def main():
             )  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
-            global_step = checkpoint.split("-"
-                                          )[-1] if len(checkpoints) > 1 else ""
+            if len(checkpoints) > 1:
+                global_step = checkpoint.split("-")[-1]
+            else:
+                global_step = ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            eval_dataset=load_and_cache_examples(args, tokenizer, processor,mode='val', label2id=label2id)
+            eval_dataset=load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode='val')
             result, _ = evaluate(
                 args=args,
                 eval_dataset=eval_dataset,
                 model=model,
                 tokenizer=tokenizer,
                 processor=processor,
-                label2id=label2id,
+                pad_token_label_id=pad_token_label_id,
                 mode="val",
                 prefix=global_step
             )
@@ -1011,14 +1055,14 @@ def main():
         )
         model = model_class.from_pretrained(args.output_dir)
         model.to(args.device)
-        test_dataset = load_and_cache_examples(args, tokenizer, processor, mode='test',label2id=label2id)
+        test_dataset = load_and_cache_examples(args, tokenizer, processor, pad_token_label_id=pad_token_label_id,mode='test')
         result, predictions = evaluate(
             args=args, 
             eval_dataset=test_dataset,
             model=model, 
             tokenizer=tokenizer, 
             processor=processor, 
-            label2id=label2id, 
+            pad_token_label_id=pad_token_label_id, 
             mode="test"
         )
         # Save results
@@ -1048,8 +1092,10 @@ def main():
                         writer.write(output_line)
                     else:
                         logger.warning(
-                            ("Maximum sequence length exceeded: "
-                            "No prediction for '%s'."),
+                            (
+                                "Maximum sequence length exceeded: "
+                                "No prediction for '%s'."
+                            ),
                             line.split()[0]
                         )
 

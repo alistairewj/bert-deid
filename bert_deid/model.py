@@ -1,6 +1,7 @@
 """Class for applying BERT-deid on text."""
 import os
 import re
+import logging
 from hashlib import sha256
 
 import numpy as np
@@ -18,7 +19,8 @@ import json
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
-    AlbertConfig, AlbertTokenizer,
+    AlbertConfig,
+    AlbertTokenizer,
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
@@ -42,6 +44,7 @@ from transformers import (
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
 from bert_deid.BERT_CRF import BertCRF
+from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
@@ -62,7 +65,8 @@ MODEL_CLASSES = {
     'bert_crf': (BertConfig, BertModel, BertTokenizer)
 }
 
-PROCESSORS = processors.PROCESSORS
+logger = logging.getLogger(__name__)
+
 
 def pool_annotations(df):
     # pool token-wise annotations together
@@ -72,8 +76,7 @@ def pool_annotations(df):
         return df
 
     # get location of maximally confident annotations
-    df_keep = df.groupby(['annotator', 'start',
-                            'stop'])[['confidence']].max()
+    df_keep = df.groupby(['annotator', 'start', 'stop'])[['confidence']].max()
 
     df_keep.reset_index(inplace=True)
 
@@ -99,18 +102,10 @@ class Transformer(object):
         task_name='i2b2_2014',
         cache_dir=None,
         device='cpu', 
-        label_transform=False, 
         bert_model_name_or_path='bert-base-uncased'
     ):
-
-        if task_name not in PROCESSORS:
-            raise ValueError(
-                f'Unrecognized task: {task_name}. Choices: {PROCESSORS.keys()}'
-            )
-
-        # TODO: try to get labels from the transformer model itself
-        self.labels = PROCESSORS[task_name]('/tmp', label_transform=label_transform).get_labels()
-        self.num_labels = len(self.labels) + 3 # account for [CLS], [SEP], [PAD] special tokens
+        self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
+        self.num_labels = len(self.label_set.label_list)
 
         # by default, we do non-overlapping segments of text
         # self.token_step_size = token_step_size
@@ -127,48 +122,23 @@ class Transformer(object):
             self.model_type]
 
         if model_type == 'bert_crf':
-            bert_model_path = bert_model_name_or_path
+            # use pretrained bert model path to initialize BertCRF object
+            new_model_path = bert_model_name_or_path
+
         else:
-            bert_model_path = model_path
+            new_model_path = model_path
+            # Use cross entropy ignore index as padding label id so
+            # that only real label ids contribute to the loss later
+        self.pad_token_label_id = CrossEntropyLoss().ignore_index
         # initialize the model
-        self.config = config_class.from_pretrained(
-            bert_model_path,
-            num_labels=self.num_labels,
-            cache_dir=cache_dir if cache_dir else None,
-        )
-
-        # determine if we are using an uncased vocabulary
-        #FIXME: not sure this works for xlm/roberta etc
-        if self.config.vocab_size == 28996:
-            self.do_lower_case = False
-        else:
-            # vocab_size == 30522
-            self.do_lower_case = True
-
-        self.tokenizer = tokenizer_class.from_pretrained(
-            bert_model_path,
-            do_lower_case=self.do_lower_case,
-            cache_dir=cache_dir if cache_dir else None,
-        )
-        self.model = model_class.from_pretrained(
-            bert_model_path,
-            from_tf=bool(".ckpt" in model_path),
-            config=self.config,
-            cache_dir=cache_dir if cache_dir else None,
-        )
+        self.config = config_class.from_pretrained(new_model_path)
+        self.tokenizer = tokenizer_class.from_pretrained(new_model_path)
+        self.model = model_class.from_pretrained(new_model_path)
+        
         if self.model_type == 'bert_crf':
             self.model = BertCRF(num_classes=self.num_labels, bert_model=self.model, device=device)
             self.model.from_pretrained(model_path)
 
-
-
-        self.special_tokens = [self.tokenizer.pad_token, self.tokenizer.cls_token, self.tokenizer.sep_token]
-        with open(os.path.join(model_path, 'label2id.json'), 'r') as f:
-            self.label2id = json.load(f)
-        self.special_token_ids = set([self.label2id[self.tokenizer.pad_token], self.label2id[self.tokenizer.cls_token], self.label2id[self.tokenizer.sep_token]])
-        self.id2label = {}
-        for label in self.label2id.keys():
-            self.id2label[self.label2id[label]] = label
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
@@ -242,23 +212,21 @@ class Transformer(object):
         examples = [processors.InputExample(guid=guid, text=text, labels=None)]
         features = tokenization.convert_examples_to_features(
             examples,
-            self.label2id,
+            self.label_set.label_to_id,
             self.max_seq_length,
             self.tokenizer,
             cls_token_at_end=bool(self.model_type in ["xlnet"]),
             # xlnet has a cls token at the end
             cls_token=self.tokenizer.cls_token,
-            cls_token_label_id=self.label2id[self.tokenizer.cls_token],
             cls_token_segment_id=2 if self.model_type in ["xlnet"] else 0,
             sep_token=self.tokenizer.sep_token,
-            sep_token_label_id = self.label2id[self.tokenizer.sep_token],
             sep_token_extra=bool(self.model_type in ["roberta"]),
             # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
             pad_on_left=bool(self.model_type in ["xlnet"]),
             # pad on the left for xlnet
             pad_token=self.tokenizer.pad_token,
             pad_token_segment_id=4 if self.model_type in ["xlnet"] else 0,
-            pad_token_label_id=self.label2id[self.tokenizer.pad_token],
+            pad_token_label_id=self.pad_token_label_id,
             feature_overlap=0
         )
 
@@ -286,9 +254,9 @@ class Transformer(object):
 
         logits = None
         out_label_ids = None
-        # eval_loss = 0.0
+        mask = None
 
-        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+        for batch in eval_dataloader:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
@@ -310,8 +278,13 @@ class Transformer(object):
             # extract output predictions (logits) as a numpy array
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
             batch_logits = batch_logits.detach().cpu().numpy()
+            batch_size, seq_len = batch_logits.shape[:2]
             if self.model_type == 'bert_crf':
-                # BertCRF only gives a label prediction currently
+                # BertCRF disregard first and last token,
+                pad_logits = np.ones((batch_size, 1)) * self.pad_token_label_id
+                batch_logits = np.concatenate((pad_logits, batch_logits, pad_logits), axis=1)
+                # BertCRF only gives a label prediction 
+                # broadcast to (,,num_label) to match to BERT output
                 batch_logits = np.expand_dims(batch_logits, axis=2)
                 batch_logits = batch_logits.astype(int)
             if logits is None:
@@ -326,14 +299,15 @@ class Transformer(object):
                     inputs["labels"].detach().cpu().numpy(),
                     axis=0
                 )
+ 
 
         # re-align the predictions with the original text
         preds, offsets, lengths = [], [], []
         for f, feature in enumerate(features):
-            # idxKeep = np.where(out_label_ids[f, :] != -100)[0]
+            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id)[0]
             # get predictions for only the kept labels
-            idxKeep= np.isin(out_label_ids[f,:], list(self.special_token_ids), invert=True)
-            idxKeep = np.nonzero(idxKeep)[0]
+            # idxKeep= np.isin(out_label_ids[f,:], list(self.special_token_ids), invert=True)
+            # idxKeep = np.nonzero(idxKeep)[0]
             preds.append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
             offsets.extend(

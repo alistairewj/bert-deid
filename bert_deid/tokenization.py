@@ -226,10 +226,12 @@ def tokenize_with_labels(
         return word_tokens, token_labels, token_sw, offsets, lengths
 
     w = 0
-    for label, start, offset in example.labels:
+    for label in example.labels:
+        entity_type = label.entity_type
+        start, offset = label.start, label.length
         stop = start + offset
         # HACK: force all labels to be upper case
-        label = label.upper()
+        entity_type = entity_type.upper()
         # get the first offset > than the label start index
         i = bisect_left(offsets, start)
         if i == len(offsets):
@@ -237,7 +239,7 @@ def tokenize_with_labels(
             # also catches the case that we label a part of a token
             # at the end of the text, but not the entire token
             if not token_sw[-1]:
-                token_labels[-1] = label
+                token_labels[-1] = entity_type
         else:
             # find the last token which is within this label
             j = bisect_left(offsets, stop)
@@ -245,7 +247,7 @@ def tokenize_with_labels(
             # assign all tokens between [start, stop] to this label
             # *except* if it is a padding token (so the model ignores subwords)
             new_labels = [
-                label if not token_sw[k] else pad_token_label_id
+                entity_type if not token_sw[k] else pad_token_label_id
                 for k in range(i, j)
             ]
             token_labels[i:j] = new_labels
@@ -255,15 +257,13 @@ def tokenize_with_labels(
 
 def convert_examples_to_features(
     examples,
-    label2id,
+    label_to_id,
     max_seq_length,
     tokenizer,
     cls_token_at_end=False,
     cls_token="[CLS]",
-    cls_token_label_id = -100,
     cls_token_segment_id=1,
     sep_token="[SEP]",
-    sep_token_label_id = -100,
     sep_token_extra=False,
     pad_on_left=False,
     pad_token="[PAD]",
@@ -271,7 +271,7 @@ def convert_examples_to_features(
     pad_token_label_id=-100,
     sequence_a_segment_id=0,
     mask_padding_with_zero=True,
-    feature_overlap=None
+    feature_overlap=None,
 ):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
@@ -286,7 +286,6 @@ def convert_examples_to_features(
                 e.g. `feature_overlap=0.1` means the last 10% of InputFeature 1 will equal first 10%
                 of InputFeature 2, assuming that the InputExample is long enough to require splitting.
     """
-
 
     # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
     special_tokens_count = 3 if sep_token_extra else 2
@@ -303,7 +302,7 @@ def convert_examples_to_features(
 
         # assign labels based off the offsets
         ex_label_ids = [
-            label2id[l] if l != pad_token_label_id else pad_token_label_id
+            label_to_id[l] if l != pad_token_label_id else pad_token_label_id
             for l in ex_labels
         ]
 
@@ -348,14 +347,14 @@ def convert_examples_to_features(
             offsets += [-1]
             lengths += [-1]
             token_sw += [False]
-            label_ids += [sep_token_label_id]
+            label_ids += [pad_token_label_id]
             if sep_token_extra:
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
                 offsets += [-1]
                 lengths += [-1]
                 token_sw += [-1]
-                label_ids += [sep_token_label_id]
+                label_ids += [pad_token_label_id]
             segment_ids = [sequence_a_segment_id] * len(tokens)
 
             if cls_token_at_end:
@@ -363,14 +362,14 @@ def convert_examples_to_features(
                 offsets += [-1]
                 lengths += [-1]
                 token_sw += [False]
-                label_ids += [cls_token_label_id]
+                label_ids += [pad_token_label_id]
                 segment_ids += [cls_token_segment_id]
             else:
                 tokens = [cls_token] + tokens
                 offsets = [-1] + offsets
                 lengths = [-1] + lengths
                 token_sw = [False] + token_sw
-                label_ids = [cls_token_label_id] + label_ids
+                label_ids = [pad_token_label_id] + label_ids
                 segment_ids = [cls_token_segment_id] + segment_ids
 
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
