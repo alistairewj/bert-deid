@@ -77,8 +77,8 @@ LABEL_MEMBERSHIP = {
             [
                 'O',
                 [
-                    'DOCTOR', 'HCPNAME'
-                    'PROFESSION', 'STATE', 'COUNTRY', 'NATIONALITY'
+                    'DOCTOR', 'HCPNAME',
+                    'PROFESSION', 'STATE', 'COUNTRY', 'NATIONALITY', 'O'
                 ]
             ]
         ],
@@ -225,7 +225,7 @@ class LabelCollection(object):
 
         # update our label list using the transform
         if self.transform is not None:
-            self.label_list = tuple([
+            self.label_list = list([
                 LABEL_MAP[self.transform][l] for l in self.label_list
             ])
 
@@ -307,7 +307,8 @@ class LabelCollection(object):
 
         if self.bio:
             # convert label to BIO format
-            label = self.split_to_bio(label)
+            if label.entity_type[:2] not in ("B-", "I-"):
+                label = self.split_to_bio(label)
 
         return label
 
@@ -351,7 +352,8 @@ class LabelCollection(object):
 
         if self.bio:
             # convert labels to BIO format
-            self.labels_to_bio()
+            if self.labels[0].entity_type[:2] not in ("B-", "I-"):
+                self.labels_to_bio()
 
     def labels_to_bio(self):
         # transform label into BIO scheme,

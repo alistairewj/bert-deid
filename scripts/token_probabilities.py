@@ -311,7 +311,7 @@ def main():
                     # token is before current ground truth label
                     break
 
-                if start >= (gs_labels[g].start + gs_labels):
+                if start >= (gs_labels[g].start + len(gs_labels)):
                     # skip to next label as we have passed this one
                     g += 1
                 else:

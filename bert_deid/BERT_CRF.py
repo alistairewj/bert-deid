@@ -44,9 +44,9 @@ class BertCRF(nn.Module):
             log_likelihood = self.crf(emissions=emissions, tags=labels, mask=mask)
             tag_seqs = torch.Tensor(self.crf.decode(emissions, mask=mask)).to(self.device)# (batch_size, seq_len)
             return -1*log_likelihood, tag_seqs
-        else:
-            tag_seqs = torch.Tensor(self.crf.decode(emissions, mask=mask)).to(self.device)
-            return None, tag_seqs
+        
+        tag_seqs = torch.Tensor(self.crf.decode(emissions, mask=mask)).to(self.device)
+        return None, tag_seqs
 
     def save_pretrained(self, save_dir):
         """Save Bert-CRF model param weights"""

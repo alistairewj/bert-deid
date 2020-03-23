@@ -14,7 +14,9 @@ from tqdm import tqdm
 from collections import OrderedDict
 
 from bert_deid import processors
-from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
+from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection, LABEL_MAP
+from sklearn.metrics import classification_report
+import json 
 
 """
 Runs BERT deid on a set of text files.
@@ -32,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def find_phi_tokens(token_text, start, end, all_labels):
     """
-    Get all phi TOKENS and correponding label, start, end (resolved conflicted-labels token by splitting on conlict)
+    Get all phi TOKENS and correponding label, start, end (resolved conflicted-labels token by splitting on conflict)
     """
     n_tokens = 0
     total_tokens = []
@@ -54,6 +56,44 @@ def find_phi_tokens(token_text, start, end, all_labels):
 
         n_tokens += 1
     return n_tokens, total_tokens
+
+
+def token_info(token_text, start, end, true_all_labels, pred_all_labels, id2label_map):
+    """
+    Given a token splitted by whitespace with corresponding start and end,
+    Return true_label(s), pred_label(s) after resolve conflicted labelling
+    """
+    true_label, pred_label = [], []
+    prev_label_y = true_all_labels[start]
+    prev_label_ypred = pred_all_labels[start]
+    current_start = start
+    for i in range(start+1, end):
+        current_label_y = true_all_labels[i]
+        current_label_ypred = pred_all_labels[i]
+        if current_label_y != prev_label_y: # false negative
+            # most frequent predicted label for token
+            prev_label_ypred = max(pred_all_labels[current_start:i],key=list(pred_all_labels[current_start:i]).count)
+            # keep track of PHI tokens
+            if prev_label_y != 0:
+                true_label.append(id2label_map[prev_label_y])
+                pred_label.append(id2label_map[prev_label_ypred])
+            prev_label_y = current_label_y
+            prev_label_ypred = current_label_ypred
+            current_start = i 
+        elif current_label_ypred != prev_label_ypred: # false positive
+            prev_label_y = max(true_all_labels[current_start:i],key=list(true_all_labels[current_start:i]).count)
+            if prev_label_ypred != 0:
+                true_label.append(id2label_map[prev_label_y])
+                pred_label.append(id2label_map[prev_label_ypred])
+            prev_label_y = current_label_y
+            prev_label_ypred = current_label_ypred
+            current_start = i
+
+    if prev_label_y != 0 or prev_label_ypred != 0:
+        true_label.append(id2label_map[prev_label_y])
+        pred_label.append(id2label_map[prev_label_ypred])
+    assert (len(pred_label) == len(true_label))
+    return true_label, pred_label
 
 
 def token_eval(phi_tokens, all_labels, is_expand):
@@ -241,11 +281,13 @@ def main():
     label_set = LabelCollection(
         data_type=args.data_type, bio=None, transform=args.label_transform
     )
-    # labels = tuple(label_set.label_list)
-    # labels.remove('O')
 
     # get the label to ID map from the label set
     label2id_map = label_set.label_to_id
+    id2label_map = {label2id_map[key]: key for key in label2id_map}
+    label_list = list(label_set.label_list)
+    label_list.remove('O')
+
 
     # read files from folder
     if os.path.exists(args.text_path):
@@ -279,6 +321,7 @@ def main():
     fn_all, fp_all = [], []
     perf_all = {}
     total_eval = 0
+    true_labels, pred_labels  = [], []
     if args.bio:
         fn_all_entity, fp_all_entity = [], []
     for fn in tqdm(input_files,total=len(input_files)):
@@ -308,7 +351,11 @@ def main():
             if args.binary_eval:
                 text_tar[row['start']:row['stop']] = 1
             else:
-                text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
+                if args.label_transform is not None:
+                    transformed_label = LABEL_MAP[args.label_transform][row['entity_type']]
+                    text_tar[row['start']:row['stop']] = label2id_map[transformed_label]
+                else:
+                    text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
         text_pred = np.zeros(len(text), dtype=int)
         for i, row in df.iterrows():
             if args.bio:
@@ -347,6 +394,12 @@ def main():
             phi_tokens_true.extend(token_y)
             _, token_ypred = find_phi_tokens(token, start, end, text_pred)
             phi_tokens_pred.extend(token_ypred)
+        
+            true_label, pred_label = token_info(token, start, end, text_tar, text_pred, id2label_map)
+            true_labels.extend(true_label)
+            pred_labels.extend(pred_label)
+            assert (len(true_labels) == len(pred_labels))
+                
 
         tp_list, fn_list = token_eval(phi_tokens_true, text_pred, args.expand_eval)
         _, fp_list = token_eval(phi_tokens_pred, text_tar, args.expand_eval)
@@ -458,6 +511,15 @@ def main():
 
     if csv_path is not None:
         df.to_csv(csv_path)
+
+    print ('length', len(true_labels))
+    print ('n phi tokens: ', sum(df['n_token_phi']))
+    tokens_report =classification_report(true_labels, pred_labels, labels=label_list, digits=4)
+    print ("**** token report *****")
+    print (tokens_report)
+    # with open('/home/jingglin/research/data/pred/i2b2_2014/token_log/test/token_report.json', 'w') as json_file:
+    #     json.dumps(tokens_report, sort_keys=True, indent=4, separators=(',', ': '))
+    
 
 if __name__ == "__main__": 
     main()
