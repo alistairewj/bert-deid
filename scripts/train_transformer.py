@@ -56,14 +56,31 @@ from transformers import (
     XLMRobertaForTokenClassification,
     XLMRobertaTokenizer,
     get_linear_schedule_with_warmup,
+    AutoConfig,
+    AutoModelWithLMHead,
+    AutoTokenizer,
+    AutoModel
 )
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
 from bert_deid.BERT_CRF import BertCRF
+from bert_deid.extra_feature import ModelExtraFeature
 
 # PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
+
+# use pydeid for adding extra feature 
+import pydeid
+from pydeid import annotator 
+import pkgutil
+
+# load all modules on path
+pkg = 'pydeid.annotator._patterns'
+PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
+    pydeid.annotator._patterns.__path__
+)]
+_PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -98,7 +115,9 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    "bert_crf": (BertConfig, BertModel, BertTokenizer)
+    "bert_crf": (BertConfig, BertModel, BertTokenizer),
+    "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizer),
+
 }
 
 
@@ -364,6 +383,15 @@ def argparser():
         default=0.1,
         help="Dropout rate for BERT-CRF"
     )
+    parser.add_argument(
+        "--feature",
+        type=str,
+        nargs='+',
+        default=None,
+        choices=_PATTERN_NAMES,
+        help="Perform rule-based approach with pydeid patterns: "
+            f"{', '.join(_PATTERN_NAMES)}"
+    )
 
     return parser
 
@@ -552,6 +580,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                 inputs["token_type_ids"] = (
                     batch[2] if args.model_type in ["bert", "xlnet"] else None
                 )  # XLM and RoBERTa don"t use segment_ids
+            if args.model_type == "bert_extra_feature":
+                inputs["extra_features"] = batch[4]
 
             outputs = model(**inputs)
             loss = outputs[
@@ -600,6 +630,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                             processor=processor,
                             pad_token_label_id=pad_token_label_id,
                             mode='dev',
+                            patterns=args.patterns
                         )
                         results, _ = evaluate(
                             args=args,
@@ -709,6 +740,9 @@ def evaluate(
                 inputs["token_type_ids"] = (
                     batch[2] if args.model_type in ["bert", "xlnet"] else None
                 )  # XLM and RoBERTa don"t use segment_ids
+
+            if args.model_type == "bert_extra_feature":
+                inputs["extra_features"] = batch[4]
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
 
@@ -764,7 +798,7 @@ def evaluate(
 
 
 def load_and_cache_examples(
-    args, tokenizer, processor, pad_token_label_id, mode
+    args, tokenizer, processor, pad_token_label_id, mode, patterns
 ):
     if args.local_rank not in [-1, 0] and not evaluate:
         # Make sure only the first process in distributed
@@ -789,7 +823,7 @@ def load_and_cache_examples(
     else:
         logger.info("Creating features from dataset file at %s", args.data_dir)
         # get examples (mode can be 'train', 'test', or 'val')
-        examples = processor.get_examples(mode)
+        examples = processor.get_examples(mode, patterns)
         features = tokenization.convert_examples_to_features(
             examples,
             processor.label_set.label_to_id,
@@ -834,9 +868,12 @@ def load_and_cache_examples(
     all_label_ids = torch.tensor(
         [f.label_ids for f in features], dtype=torch.long
     )
+    all_extra_features = torch.tensor(
+        [f.extra_feature for f in features], dtype=torch.long
+    )
 
     dataset = TensorDataset(
-        all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+        all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_extra_features
     )
     return dataset
 
@@ -911,6 +948,24 @@ def main():
         label_set
     )
 
+    labels = processor.label_set.label_list
+    label_map = processor.label_set.label_to_id
+
+    args.patterns = []
+    if args.feature is not None:
+        for f in args.feature:
+            f = f.lower()
+            if f not in _PATTERN_NAMES:
+                raise ValueError("Invalid feature name")
+            args.patterns.append(f)
+    if 'all' in args.patterns:
+        args.patterns = PATTERN_NAMES
+    print ('patterns', args.patterns)
+
+    if args.model_type == 'bert_extra_feature':
+        if len(args.patterns) == 0:
+            raise ValueError("Add pydeid pattern to perform bert-feature ensemble")
+
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
         # Make sure only the first process in distributed
@@ -934,12 +989,24 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
 
-    model = model_class.from_pretrained(
-        args.model_name_or_path,
-        from_tf=bool(".ckpt" in args.model_name_or_path),
-        config=config,
-        cache_dir=args.cache_dir if args.cache_dir else None,
-    )
+    model_params = {
+        'pretrained_model_name_or_path': args.model_name_or_path,
+        'from_tf': bool(".ckpt" in args.model_name_or_path),
+        'config': config,
+        'cache_dir': args.cache_dir if args.cache_dir else None
+    }
+
+    if args.model_type == 'bert_extra_feature':
+        model_params['num_features'] = len(args.patterns)
+
+    model = model_class.from_pretrained(**model_params)
+
+    # model = model_class.from_pretrained(
+    #     args.model_name_or_path,
+    #     from_tf=bool(".ckpt" in args.model_name_or_path),
+    #     config=config,
+    #     cache_dir=args.cache_dir if args.cache_dir else None,
+    # )
 
     # label2id = processor.label_set.label_to_id
     if args.model_type == 'bert_crf':
@@ -959,6 +1026,7 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
+
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(
@@ -967,6 +1035,7 @@ def main():
             processor=processor, 
             pad_token_label_id=pad_token_label_id,
             mode="train", 
+            patterns=args.patterns
         )
         global_step, tr_loss = train(
             args, train_dataset, model, tokenizer, processor, pad_token_label_id
@@ -1026,7 +1095,7 @@ def main():
                 global_step = ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            eval_dataset=load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode='val')
+            eval_dataset=load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode='val', patterns=args.patterns)
             result, _ = evaluate(
                 args=args,
                 eval_dataset=eval_dataset,

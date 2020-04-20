@@ -12,6 +12,18 @@ from bert_deid.processors import DeidProcessor
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 from tqdm import tqdm
 
+# use pydeid for adding extra feature 
+import pydeid
+from pydeid import annotator 
+import pkgutil
+
+# load all modules on path
+pkg = 'pydeid.annotator._patterns'
+PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
+    pydeid.annotator._patterns.__path__
+)]
+_PATTERN_NAMES = PATTERN_NAMES + ['all']
+
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
 
@@ -72,6 +84,15 @@ if __name__ == '__main__':
         choices=list(LABEL_MEMBERSHIP.keys()),
         help="Label transformation to apply."
     )
+    parser.add_argument(
+        "--feature",
+        type=str,
+        nargs='+',
+        default=None,
+        choices=_PATTERN_NAMES,
+        help="Perform rule-based approach with pydeid patterns: "
+            f"{', '.join(_PATTERN_NAMES)}"
+    )
     args = parser.parse_args()
 
     # prepare the label set - gives us mapping from ID to label
@@ -79,9 +100,21 @@ if __name__ == '__main__':
         args.task, bio=args.bio, transform=args.label_transform
     )
 
+    args.patterns = []
+    if args.feature is not None:
+        for f in args.feature:
+            f = f.lower()
+            if f not in _PATTERN_NAMES:
+                raise ValueError("Invalid feature name")
+            args.patterns.append(f)
+    
+    if 'all' in args.patterns:
+        args.patterns = PATTERN_NAMES
+
     # load in a trained model
     transformer = Transformer(
-        args.model_type, args.model_dir, max_seq_length=128, device='cpu', bert_model_name_or_path=args.model_name_or_path
+        args.model_type, args.model_dir, max_seq_length=128, device='cpu', bert_model_name_or_path=args.model_name_or_path,
+        patterns=args.patterns 
     )
 
     label_to_id = transformer.label_set.label_to_id
@@ -113,6 +146,7 @@ if __name__ == '__main__':
             text = ''.join(fp.readlines())
 
         ex_preds, ex_lengths, ex_offsets = transformer.predict(text)
+
 
         if preds is None:
             preds = ex_preds

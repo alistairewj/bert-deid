@@ -44,6 +44,7 @@ from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
 from bert_deid.BERT_CRF import BertCRF
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
+from bert_deid.extra_feature import ModelExtraFeature
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
@@ -61,7 +62,8 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    'bert_crf': (BertConfig, BertModel, BertTokenizer)
+    'bert_crf': (BertConfig, BertModel, BertTokenizer),
+    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizer)
 }
 
 logger = logging.getLogger(__name__)
@@ -99,10 +101,12 @@ class Transformer(object):
         # sequence_length=100,
         max_seq_length=128,
         device='cpu', 
-        bert_model_name_or_path='bert-base-uncased'
+        bert_model_name_or_path='bert-base-uncased',
+        patterns=[],
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
         self.num_labels = len(self.label_set.label_list)
+        self.patterns = patterns
 
         # by default, we do non-overlapping segments of text
         # self.token_step_size = token_step_size
@@ -129,7 +133,10 @@ class Transformer(object):
         # initialize the model
         self.config = config_class.from_pretrained(new_model_path)
         self.tokenizer = tokenizer_class.from_pretrained(new_model_path)
-        self.model = model_class.from_pretrained(new_model_path)
+        model_param = {'pretrained_model_name_or_path':new_model_path}
+        if model_type == 'bert_extra_feature':
+            model_param['num_features'] = len(self.patterns)
+        self.model = model_class.from_pretrained(**model_param)
         
         if self.model_type == 'bert_crf':
             self.model = BertCRF(num_classes=self.num_labels, bert_model=self.model, device=device)
@@ -205,7 +212,7 @@ class Transformer(object):
         # in this case we have a length 1 example
         # we use the SHA-256 hash of the text as the globally unique identifier
         guid = sha256(text.encode()).hexdigest()
-        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
+        examples = [processors.InputExample(guid=guid, text=text, labels=None, patterns=self.patterns)]
         features = tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
@@ -239,9 +246,12 @@ class Transformer(object):
         all_label_ids = torch.tensor(
             [f.label_ids for f in features], dtype=torch.long
         )
+        all_extra_features = torch.tensor(
+            [f.extra_feature for f in features], dtype=torch.long
+        )
 
         eval_dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+            all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_extra_features
         )
         eval_sampler = SequentialSampler(eval_dataset)
         eval_dataloader = DataLoader(
@@ -266,6 +276,8 @@ class Transformer(object):
                         batch[2]
                         if self.model_type in ["bert", "xlnet"] else None
                     )  # XLM and RoBERTa don"t use segment_ids
+                if self.model_type == 'bert_extra_feature':
+                    inputs['extra_features'] = batch[4]
                 outputs = self.model(**inputs)
                 _, batch_logits = outputs[:2]
 

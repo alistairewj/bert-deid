@@ -13,10 +13,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 class InputExample(object):
     """A single training/test example."""
-    def __init__(self, guid, text, labels=None):
+    def __init__(self, guid, text, labels=None, patterns=[]):
         """Constructs an InputExample.
 
         Args:
@@ -29,6 +28,7 @@ class InputExample(object):
         self.guid = guid
         self.text = text
         self.labels = labels
+        self.patterns = patterns
 
 
 class DataProcessor(object):
@@ -46,10 +46,10 @@ class DataProcessor(object):
         else:
             return list(self.label_set.label_list)
 
-    def _create_examples(self, fn, mode):
+    def _create_examples(self, fn, mode, patterns=[]):
         raise NotImplementedError()
 
-    def get_examples(self, mode):
+    def get_examples(self, mode, patterns=[]):
         if mode not in ('train', 'test', 'val'):
             raise ValueError(
                 (
@@ -66,7 +66,7 @@ class DataProcessor(object):
             )
 
         fn = os.path.join(self.data_dir, self.data_filenames[mode])
-        return self._create_examples(fn, mode)
+        return self._create_examples(fn, mode, patterns)
 
     def _read_file(self, input_file, delimiter=',', quotechar='"'):
         """Reads a comma separated value file."""
@@ -106,7 +106,7 @@ class CoNLLProcessor(DataProcessor):
         )
 
     # def _create_examples(self, lines, set_type):
-    def _create_examples(self, fn, set_type):
+    def _create_examples(self, fn, set_type, patterns=[]):
         """Creates examples for the training and test sets."""
         examples = []
         sentence = []
@@ -143,7 +143,7 @@ class CoNLLProcessor(DataProcessor):
                 sentence = ' '.join(sentence)
                 examples.append(
                     InputExample(
-                        guid=guid, text=sentence, labels=label_offsets
+                        guid=guid, text=sentence, labels=label_offsets, patterns=patterns
                     )
                 )
                 sentence = []
@@ -169,7 +169,7 @@ class DeidProcessor(DataProcessor):
         self.data_filenames = {'train': 'train', 'test': 'test'}
         self.label_set = label_set
 
-    def _create_examples(self, fn, set_type):  # lines, set_type):
+    def _create_examples(self, fn, set_type, patterns=[]):  # lines, set_type):
         """Creates examples for the training, validation, and test sets."""
         examples = []
 
@@ -196,7 +196,7 @@ class DeidProcessor(DataProcessor):
             self.label_set.from_csv(fn)
             examples.append(
                 InputExample(
-                    guid=guid, text=text, labels=self.label_set.labels
+                    guid=guid, text=text, labels=self.label_set.labels, patterns=patterns
                 )
             )
 

@@ -273,8 +273,8 @@ def main():
     df = pd.DataFrame.from_dict(perf_all, orient='index')
 
     print(df)
-    print('\nFalse negatives\n"{}"'.format('","'.join(fn_all)))
-    print('\nFalse positives:\n"{}"'.format('","'.join(fp_all)))
+    # print('\nFalse negatives\n"{}"'.format('","'.join(fn_all)))
+    # print('\nFalse positives:\n"{}"'.format('","'.join(fp_all)))
     print('\n')
 
     # summary stats

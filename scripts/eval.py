@@ -382,6 +382,7 @@ def main():
         curr_performance['n_char_fp'] = len(np.nonzero(text_pred)[0]) - curr_performance['n_char_tp']
         curr_performance['n_char_fn'] = len(np.nonzero(text_tar)[0]) - curr_performance['n_char_tp']
 
+
         # report performance on token wise
         phi_tokens_true, phi_tokens_pred = [], []
         n_tokens = 0
@@ -461,6 +462,7 @@ def main():
                     log_text[key] += "\n"
                     if (',' in token) or ("\n" in token) or ('"' in token):
                         token = '"' + token.replace('"', '""') + '"'
+                    label = id2label_map[label]
                     log_text[key] += f'{fn},,{start},{stop},{token},{label},\n'
 
 

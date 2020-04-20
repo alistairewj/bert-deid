@@ -23,6 +23,9 @@ import os
 import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
+# from bert_deid.pattern import create_extra_feature_vectors
+from bert_deid.ensemble_feature import create_extra_feature_vectors
+
 
 import numpy as np
 
@@ -44,7 +47,8 @@ class InputFeatures(object):
         label_ids,
         input_subwords=None,
         input_offsets=None,
-        input_lengths=None
+        input_lengths=None,
+        extra_feature=None,
     ):
         self.input_ids = input_ids
         self.input_mask = input_mask
@@ -55,6 +59,8 @@ class InputFeatures(object):
         self.input_subwords = input_subwords
         self.input_offsets = input_offsets
         self.input_lengths = input_lengths
+
+        self.extra_feature = extra_feature
 
 
 def pattern_spans(text, pattern):
@@ -404,6 +410,14 @@ def convert_examples_to_features(
                 lengths += [-1] * padding_length
                 token_sw += [False] * padding_length
 
+            patterns = example.patterns
+            pattern_label = 1
+            extra_features = []
+            for pattern in patterns:
+                extra_feature = create_extra_feature_vectors(pattern, pattern_label, example.text, offsets, lengths, token_sw)
+                extra_features.append(extra_feature)
+
+
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
@@ -411,6 +425,9 @@ def convert_examples_to_features(
             assert len(offsets) == max_seq_length
             assert len(lengths) == max_seq_length
             assert len(token_sw) == max_seq_length
+            if len(extra_features) > 0:
+                assert len(extra_features[0]) == max_seq_length
+                assert len(extra_features) == len(example.patterns)
 
             if n_obs < 5:
                 logger.info("*** Example ***")
@@ -431,6 +448,8 @@ def convert_examples_to_features(
                 logger.info(
                     "label_ids: %s", " ".join([str(x) for x in label_ids])
                 )
+                for each_feature in extra_features:
+                    logger.info('extra feature: %s', ' '.join([str(x) for x in each_feature]))
                 logger.info("offsets: %s", " ".join([str(x) for x in offsets]))
 
             features.append(
@@ -441,7 +460,8 @@ def convert_examples_to_features(
                     label_ids=label_ids,
                     input_offsets=offsets,
                     input_lengths=lengths,
-                    input_subwords=token_sw
+                    input_subwords=token_sw,
+                    extra_feature=extra_features,
                 )
             )
             n_obs += 1
