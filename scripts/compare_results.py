@@ -16,7 +16,7 @@ logger.setLevel(logging.WARNING)
 
 import bert_deid.utils as utils
 from bert_deid import processors
-from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
+from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP, LABEL_MAP
 
 # load all modules on path
 pkg = 'pydeid.annotator._patterns'
@@ -146,7 +146,7 @@ if __name__ == '__main__':
 
 
     label_set = LabelCollection(
-        args.data_type, bio=args.bio, transform=None
+        args.data_type, bio=args.bio, transform=args.label_transform
     )
     processor = processors.DeidProcessor(
         args.data_dir,
@@ -187,10 +187,15 @@ if __name__ == '__main__':
 
         # binary vector indicating PHI/not phi
         text_tar = np.zeros(len(text))
-        
+
         # map (start, stop): row index in gs
         for i, row in gs.iterrows():
-            text_tar[row['start']:row['stop']] = label2id[row['entity_type'].upper()]
+            entity_type = row['entity_type'].upper()
+            if args.label_transform is not None:
+                entity_type = LABEL_MAP[args.label_transform][entity_type]
+
+            text_tar[row['start']:row['stop']] = label2id[entity_type]
+    
 
         # binary vector indicating if predicted as phi
         text_pred = np.zeros(len(text), dtype=bool)

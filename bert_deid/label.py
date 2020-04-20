@@ -491,8 +491,10 @@ class LabelCollection(object):
                 'NAME',
                 # professions
                 # locations
+                'LOCATION',
                 'PROTECTED_ENTITY',
                 'ORGANIZATION',
+                'NATIONALITY',
                 # ages
                 'AGE',
                 'AGE_>_89',
