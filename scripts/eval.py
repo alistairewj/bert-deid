@@ -352,10 +352,10 @@ def main():
                 text_tar[row['start']:row['stop']] = 1
             else:
                 if args.label_transform is not None:
-                    transformed_label = LABEL_MAP[args.label_transform][row['entity_type']]
+                    transformed_label = LABEL_MAP[args.label_transform][row['entity_type'].upper()]
                     text_tar[row['start']:row['stop']] = label2id_map[transformed_label]
                 else:
-                    text_tar[row['start']:row['stop']] = label2id_map[row['entity_type']]
+                    text_tar[row['start']:row['stop']] = label2id_map[row['entity_type'].upper()]
         text_pred = np.zeros(len(text), dtype=int)
         for i, row in df.iterrows():
             if args.bio:

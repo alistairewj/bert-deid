@@ -210,10 +210,13 @@ class LabelCollection(object):
         self.label_list = list(self.define_label_set(data_type))
 
         # update our label list using the transform
+        # if self.transform is not None:
+        #     self.label_list = list(
+        #         set([LABEL_MAP[self.transform][l] for l in self.label_list])
+        #     )
+        #     self.label_list.sort()
         if self.transform is not None:
-            self.label_list = list(
-                set([LABEL_MAP[self.transform][l] for l in self.label_list])
-            )
+            self.label_list = list(l for l, _ in LABEL_MEMBERSHIP[self.transform])
             self.label_list.sort()
 
         # enforce 'O' to be first label in all cases
