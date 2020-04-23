@@ -24,7 +24,7 @@ import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
 # from bert_deid.pattern import create_extra_feature_vectors
-from bert_deid.ensemble_feature import create_extra_feature_vectors
+from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
 
 
 import numpy as np
@@ -302,6 +302,14 @@ def convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
 
+        patterns = example.patterns
+        pattern_label = 1
+        ex_phi_locs = []
+        for pattern in patterns:
+            ex_phi_locs.append(find_phi_location(pattern, pattern_label, example.text))
+
+        assert (len(patterns) == len(ex_phi_locs))
+
         ex_tokens, ex_labels, ex_token_sw, ex_offsets, ex_lengths = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
         )
@@ -410,11 +418,9 @@ def convert_examples_to_features(
                 lengths += [-1] * padding_length
                 token_sw += [False] * padding_length
 
-            patterns = example.patterns
-            pattern_label = 1
             extra_features = []
-            for pattern in patterns:
-                extra_feature = create_extra_feature_vectors(pattern, pattern_label, example.text, offsets, lengths, token_sw)
+            for i in range(len(ex_phi_locs)):
+                extra_feature = create_extra_feature_vector(ex_phi_locs[i], offsets, lengths, token_sw)
                 extra_features.append(extra_feature)
 
 

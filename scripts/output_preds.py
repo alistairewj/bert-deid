@@ -14,13 +14,13 @@ from tqdm import tqdm
 
 # use pydeid for adding extra feature 
 import pydeid
-from pydeid import annotator 
 import pkgutil
 
+from pydeid.annotators import _patterns
 # load all modules on path
-pkg = 'pydeid.annotator._patterns'
+pkg = 'pydeid.annotators._patterns'
 PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    pydeid.annotator._patterns.__path__
+    _patterns.__path__
 )]
 _PATTERN_NAMES = PATTERN_NAMES + ['all']
 

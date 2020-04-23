@@ -7,7 +7,6 @@ from tqdm import tqdm
 import argparse
 import pkgutil 
 import pydeid
-from pydeid import annotator
 import numpy as np
 import re
 
@@ -18,10 +17,11 @@ import bert_deid.utils as utils
 from bert_deid import processors
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP, LABEL_MAP
 
+from pydeid.annotators import _patterns
 # load all modules on path
-pkg = 'pydeid.annotator._patterns'
+pkg = 'pydeid.annotators._patterns'
 PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    pydeid.annotator._patterns.__path__
+    _patterns.__path__
 )]
 _PATTERN_NAMES = PATTERN_NAMES + ['all']
 

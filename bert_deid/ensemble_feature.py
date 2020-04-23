@@ -1,38 +1,38 @@
 import pydeid
-from pydeid import annotator 
 import pkgutil
+from pydeid.annotation import Document, EntityType
+from pydeid.annotators import Pattern
 
+from pydeid.annotators import _patterns
 # load all modules on path
-pkg = 'pydeid.annotator._patterns'
+pkg = 'pydeid.annotators._patterns'
 _PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    pydeid.annotator._patterns.__path__
+    _patterns.__path__
 )]
-# _PATTERN_NAMES = PATTERN_NAMES + ['all']
 
-
-def create_extra_feature_vectors(pattern_name, pattern_label, text, input_offsets, input_lengths, token_sw,
-    max_seq_length=128):
+def find_phi_location(pattern_name, pattern_label, text):
     if pattern_name is None:
         return None
     if pattern_name.lower() not in _PATTERN_NAMES:
         raise ValueError("Invalid pattern argument")
 
+    doc = Document(text)
+
     # find PHI with specific pydeid pattern
-    # if pattern_name == 'all':
-    #     modules = PATTERN_NAMES
-    # else:
-    #     modules = [pattern_name]
+    entity_types = [EntityType(pattern_name)]
     modules = [pattern_name]
-    model = annotator.Pattern(modules)
-    pydeid_phi_df = model.annotate(text)
+    model = Pattern(modules, entity_types)
+    txt_annotated = model.annotate(doc)
 
     # mark location of detected phi with 1s and rest with 0s
     phi_loc = [0] * len(text)
-    for i, row in pydeid_phi_df.iterrows():
-        start, end = row['start'], row['stop']
+    for ann in txt_annotated.annotations:
+        start, end = ann.start, ann.end
         phi_loc[start:end] = [pattern_label] * (end-start)
+    
+    return phi_loc
 
-
+def create_extra_feature_vector(phi_loc, input_offsets, input_lengths, token_sw, max_seq_length=128):
     # transform feature to match with BERT tokenization offset
     feature_vector = []
     for i in range(len(input_offsets)):
