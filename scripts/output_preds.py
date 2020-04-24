@@ -22,6 +22,7 @@ pkg = 'pydeid.annotators._patterns'
 PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
     _patterns.__path__
 )]
+PATTERN_NAMES.remove('_pattern')
 _PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 logger = logging.getLogger()

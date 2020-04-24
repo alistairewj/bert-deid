@@ -9,6 +9,7 @@ pkg = 'pydeid.annotators._patterns'
 _PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
     _patterns.__path__
 )]
+_PATTERN_NAMES.remove('_pattern')
 
 def find_phi_location(pattern_name, pattern_label, text):
     if pattern_name is None:
