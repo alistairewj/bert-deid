@@ -25,7 +25,7 @@ Look at the `deid-gs` repository for examples of datasets in this format.
 
 With the dataset available, create the environment:
 
-`conda create env -f environment.yml`
+`conda env create -f environment.yml`
 
 Activate the environment:
 

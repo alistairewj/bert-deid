@@ -12,7 +12,7 @@ LABEL_MEMBERSHIP = {
                 'NAME',
                 [
                     'NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
-                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL'
+                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL', 'KEYVALUE',
                 ]
             ], ['PROFESSION', ['PROFESSION']],
             [
@@ -28,7 +28,7 @@ LABEL_MEMBERSHIP = {
                 'ID',
                 [
                     'BIOID', 'DEVICE', 'HEALTHPLAN', 'IDNUM', 'MEDICALRECORD',
-                    'ID', 'OTHER'
+                    'ID', 'IDENTIFIER', 'OTHER'
                 ]
             ],
             [
@@ -42,7 +42,7 @@ LABEL_MEMBERSHIP = {
                 'NAME',
                 [
                     'NAME', 'PATIENT', 'USERNAME', 'RELATIVEPROXYNAME',
-                    'PTNAME', 'PTNAMEINITIAL'
+                    'PTNAME', 'PTNAMEINITIAL', 'KEYVALUE',
                 ]
             ],
             [
@@ -59,7 +59,7 @@ LABEL_MEMBERSHIP = {
                 'ID',
                 [
                     'BIOID', 'DEVICE', 'HEALTHPLAN', 'IDNUM', 'MEDICALRECORD',
-                    'ID', 'OTHER'
+                    'ID', 'IDENTIFIER', 'OTHER'
                 ]
             ],
             [
@@ -94,6 +94,7 @@ LABEL_MEMBERSHIP = {
                     'PTNAME',
                     'PTNAMEINITIAL',
                     'DOCTOR',
+                    'KEYVALUE',
                     'HCPNAME',
                     'LOCATION',
                     'ORGANIZATION',
@@ -120,6 +121,7 @@ LABEL_MEMBERSHIP = {
                     'IDNUM',
                     'MEDICALRECORD',
                     'ID',
+                    'IDENTIFIER',
                     'OTHER',
                     'EMAIL',
                     'FAX',
@@ -492,6 +494,7 @@ class LabelCollection(object):
                 'O',
                 # names
                 'NAME',
+                'KEYVALUE',
                 # professions
                 # locations
                 'LOCATION',
@@ -504,6 +507,7 @@ class LabelCollection(object):
                 # dates
                 'DATE',
                 # IDs
+                'IDENTIFIER',
                 'OTHER',
                 # contacts
                 'CONTACT'
