@@ -9,19 +9,31 @@ import argparse
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
 
+feature2label = {'age': 'AGE', 'date': 'DATE', 'email': 'CONTACT', 'idnum': 'ID',
+                    'initials': 'NAME', 'location': 'LOCATION', 'mrn': 'ID', 'name': 'NAME', 'pager': 'ID',
+                    'ssn':'ID', 'telephone': 'CONTACT', 'unit': 'ID', 'url': 'CONTACT'}
 
-
-def combine_results(bert_df, pydeid_df, text):
+def combine_results(bert_df, pydeid_df, text, feature, is_bio):
     
-    def get_intervals(df):
+    def get_bert_intervals(df, feature):
+        arr = []
+        for i, row in df.iterrows():
+            entity_type = row['entity_type'].upper()
+            if is_bio:
+                entity_type = entity_type[2:]
+            if entity_type == feature2label[feature]:
+                arr.append((row['start'], row['stop']))
+        
+        return arr
+    def get_pydeid_intervals(df, feature):
         arr = []
         for i, row in df.iterrows():
             arr.append((row['start'], row['stop']))
         
         return arr
     
-    bert_intervals = get_intervals(bert_df)
-    pydeid_intervals = get_intervals(pydeid_df)
+    bert_intervals = get_bert_intervals(bert_df, feature)
+    pydeid_intervals = get_pydeid_intervals(pydeid_df, feature)
     
     combined_intervals = bert_intervals + pydeid_intervals
             
@@ -54,12 +66,27 @@ def combine_results(bert_df, pydeid_df, text):
         document_id = pydeid_df['document_id'].iloc[0]
     else:
         return new_df
-    for start, stop in merge_intervals(combined_intervals):
+    for start, stop in combined_intervals:
         entity = text[start:stop]
-        # only takes care of binary 
-        entity_type = 'PHI'
+        entity_type = feature2label[feature]
+        if is_bio:
+            entity_type = 'B-' + entity_type
         new_df = new_df.append({"document_id":document_id, "annotation_id":"",
-        "start":start,"stop":stop,"entity":entity, "entity_type":entity_type,"cooment":""}, ignore_index=True)
+        "start":start,"stop":stop,"entity":entity, "entity_type":entity_type,"comment":""}, ignore_index=True)
+
+    for i, row in bert_df.iterrows():
+        entity_type = row['entity_type'].upper()
+        if is_bio:
+            entity_type = entity_type[2:]
+        start, stop = row['start'], row['stop']
+        entity = text[start:stop]
+        if entity_type != feature2label[feature]:
+            if is_bio:
+                entity_type = 'B-' + entity_type
+            new_df = new_df.append({"document_id":document_id, "annotation_id":"",
+        "start":start,"stop":stop,"entity":entity, "entity_type":entity_type,"comment":""}, ignore_index=True)
+
+    new_df = new_df.sort_values(by ='start')
         
     return new_df
 
@@ -88,6 +115,18 @@ if __name__ == '__main__':
         type=str, 
         required=True,
         help="Pydeid annotation result dir"
+    )
+    parser.add_argument(
+        "--feature", 
+        default='age', 
+        type=str, 
+        required=True,
+        help="feature"
+    )
+    parser.add_argument(
+        "--bio", 
+        action='store_true',
+        help="Whether to transform labels to use inside-outside-beginning tags"
     )
     parser.add_argument(
         "--output_folder",
@@ -139,7 +178,7 @@ if __name__ == '__main__':
         with open(data_path / 'txt' / f'{fn[:-4]}txt', 'r') as fp:
             text = ''.join(fp.readlines())
 
-        ex_preds = combine_results(bert_df, pydeid_df, text)
+        ex_preds = combine_results(bert_df, pydeid_df, text, args.feature, args.bio)
         if output_folder is not None:
             ex_preds.to_csv(output_folder / f'{fn[:-4]}pred', index=False)
 

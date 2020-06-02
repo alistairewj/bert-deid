@@ -11,6 +11,7 @@ from bert_deid.model import Transformer
 from bert_deid.processors import DeidProcessor
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 from tqdm import tqdm
+import torch
 
 # use pydeid for adding extra feature 
 import pydeid
@@ -49,12 +50,6 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--model_type", default='bert', type=str, help="Type of model"
-    )
-    parser.add_argument(
-        '--model_name_or_path',
-        default='bert-base-uncased',
-        type=str,
-        help="Pretrained bert model used in training. Only require when model_type is 'bert_crf'."
     )
     parser.add_argument(
         "--task",
@@ -112,9 +107,12 @@ if __name__ == '__main__':
     if 'all' in args.patterns:
         args.patterns = PATTERN_NAMES
 
+    device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
     # load in a trained model
     transformer = Transformer(
-        args.model_type, args.model_dir, max_seq_length=128, device='cpu', bert_model_name_or_path=args.model_name_or_path,
+        args.model_type, args.model_dir, max_seq_length=128, device=device, 
         patterns=args.patterns 
     )
 
@@ -163,7 +161,7 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    if args.model_type == 'bert_crf':
+                    if args.model_type == 'bert_crf' or args.model_type == 'bert_extra_feature_crf':
                         assert(len(ex_preds[i,:]) == 1)
                         # BertCRF gives one predicted tag id: (batch_size, max_seq_len, 1)
                         entity_type = transformer.label_set.id_to_label[int(ex_preds[i,:][0])]
