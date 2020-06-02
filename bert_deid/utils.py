@@ -762,6 +762,29 @@ def compute_stats(df, is_token, is_micro):
     f1 = 2 * se * ppv / (se + ppv)
     return se, ppv, f1
 
+def compute_token_type_stats(df, is_token, is_micro, labels):
+    """
+    Compute se (recall), ppv (precision), f1 score
+    """
+    stats = {}
+    for label in labels:
+        type_eval = 'n_{}_'.format(label)
+        if is_token:
+            type_eval += 'token_'
+        else:
+            type_eval += 'entity_'
+
+        tp = df[type_eval + 'tp']
+        fp = df[type_eval + 'fp']
+        fn = df[type_eval + 'fn']
+        if is_micro:
+            tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
+        se = tp / (tp + fn)
+        ppv = tp / (tp + fp)
+        f1 = 2 * se * ppv / (se + ppv)
+        stats[label] = (se, ppv, f1)
+    return stats
+
 
 def get_entities(data):
     """
@@ -769,7 +792,7 @@ def get_entities(data):
     """
     entities = [
         (
-            data['entity'].iloc[i], data['entity_type'].iloc[i].lower(),
+            data['entity'].iloc[i], data['entity_type'].iloc[i],
             data['start'].iloc[i], data['stop'].iloc[i]
         ) for i in range(len(data))
     ]

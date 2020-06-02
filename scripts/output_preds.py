@@ -38,6 +38,16 @@ if __name__ == '__main__':
         help="Path to the model.",
     )
     parser.add_argument(
+        "--model_type", default='bert', type=str, help="Type of model"
+    )
+    parser.add_argument(
+        "--task",
+        default='i2b2_2014',
+        type=str,
+        choices=LABEL_SETS,
+        help=f"Type of dataset: {', '.join(LABEL_SETS)}.",
+    )
+    parser.add_argument(
         "--output",
         default='preds.pkl',
         type=str,
@@ -80,9 +90,14 @@ if __name__ == '__main__':
             f = f.lower()
             args.patterns.append(f)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # load in a trained model
     transformer = Transformer(
-        args.model_dir, device='cpu', patterns=args.patterns
+        args.model_type,
+        args.model_dir,
+        max_seq_length=128,
+        device=device,
+        patterns=args.patterns
     )
 
     label_to_id = transformer.label_set.label_to_id
@@ -129,7 +144,7 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    if args.model_type == 'bert_crf':
+                    if args.model_type == 'bert_crf' or args.model_type == 'bert_extra_feature_crf':
                         assert (len(ex_preds[i, :]) == 1)
                         # BertCRF gives one predicted tag id: (batch_size, max_seq_len, 1)
                         entity_type = transformer.label_set.id_to_label[int(

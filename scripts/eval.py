@@ -148,7 +148,28 @@ def token_eval(phi_tokens, all_labels, is_expand):
     return tp_list, false_list
 
 
-def merge_BIO_pred(anno, is_binary, is_expand, text):
+def token_type_eval(
+    phi_token_true, tp_list, fp_list, fn_list, id2label_map, curr_performance
+):
+    def count_freq(lis, label):
+        count = 0
+        for _, l, _, _ in lis:
+            if label == l:
+                count += 1
+        return count
+
+    for idval in id2label_map.keys():
+        curr_performance['n_{}_token_phi'.format(id2label_map[idval])
+                        ] = count_freq(phi_token_true, idval)
+        curr_performance['n_{}_token_tp'.format(id2label_map[idval])
+                        ] = count_freq(tp_list, idval)
+        curr_performance['n_{}_token_fp'.format(id2label_map[idval])
+                        ] = count_freq(fp_list, idval)
+        curr_performance['n_{}_token_fn'.format(id2label_map[idval])
+                        ] = count_freq(fn_list, idval)
+
+
+def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
     sort_by_start = anno.sort_values("start")
     # find starting row index for each PHI predicted
     entity_starts = []
@@ -279,6 +300,12 @@ def main():
         default=None,
         help="CSV file to output errors for labelling"
     )
+    parser.add_argument(
+        "--stats",
+        type=str,
+        default=None,
+        help="CSV file for result performance"
+    )
 
     args = parser.parse_args()
 
@@ -303,6 +330,11 @@ def main():
                 ["False Positives Token", ''], ['False Positives Entity', '']
             ]
         )
+    stats_path = None
+    if args.stats is not None:
+        stats_path = Path(args.stats)
+        if not os.path.exists(log_path.parents[0]):
+            os.makedirs(stats_path.parents[0])
 
     input_ext = '.txt'
     gs_ext = args.ref_extension
@@ -312,15 +344,29 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    label_set = torch.load(os.path.join(args.model_dir, 'label_set.bin'))
+    label_set = LabelCollection(
+        data_type=args.data_type, bio=args.bio, transform=args.label_transform
+    )
 
     # get the label to ID map from the label set
-    if args.binary:
-        label2id_map = {'O': 0, 'PHI': 1}
-    else:
-        label2id_map = label_set.label_to_id
-
+    label2id_map = label_set.label_to_id
+    print('label2id', label2id_map)
+    # only for pydeid
+    # id2label_map = {0: 'O', 1:'age', 2:'contact', 3:'date', 4:'id', 5:'location', 6:'name', 7:'profession'}
+    # label2id_map = {'O': 0, 'age':1, 'date': 3, 'email':2, 'idnum':4, 'initials':6, 'location':5,
+    # 'mrn':4, 'name':6, 'pager': 4, 'ssn': 4, 'telephone':2, 'unit':4, 'url':2 }
+    if args.bio:
+        new_label2id_map = {'O': 0}
+        for label in label2id_map.keys():
+            if label != 'O':
+                new_label = label[2:]
+                if new_label not in new_label2id_map:
+                    new_label2id_map[new_label] = len(new_label2id_map)
+        label2id_map = new_label2id_map
+    if args.binary_eval:
+        label2id_map = {'O': 0, 'phi': 1}
     id2label_map = {label2id_map[key]: key for key in label2id_map}
+
     label_list = list(label2id_map.keys())
     label_list.remove('O')
 
@@ -384,16 +430,58 @@ def main():
             if args.binary:
                 text_tar[start:stop] = 1
             else:
-                text_tar[start:stop] = gs_label_set.label_to_id[entity_type]
-
+                if args.label_transform is not None:
+                    transformed_label = LABEL_MAP[args.label_transform][
+                        row['entity_type'].upper()]
+                    text_tar[row['start']:row['stop']] = label2id_map[
+                        transformed_label]
+                else:
+                    text_tar[row['start']:row['stop']] = label2id_map[
+                        row['entity_type']]
         text_pred = np.zeros(len(text), dtype=int)
-        for i, label in enumerate(pred_label_set.labels):
-            start, stop = label.start, label.start + label.length
-            entity_type = label.entity_type
-            if args.binary:
-                text_pred[start:stop] = 1
+        for i, row in df.iterrows():
+            if args.bio:
+                if (
+                    'B-' not in row['entity_type'] and
+                    'I-' not in row['entity_type']
+                ) and row['entity_type'].lower() != 'phi':
+                    entity_type = row['entity_type']
+                if (
+                    'B-' in row['entity_type'].upper() or
+                    'I-' in row['entity_type'].upper()
+                ):
+                    entity_type = row['entity_type'][
+                        2:]  # remove b- or i-, don't care for char eval
             else:
-                text_pred[start:stop] = label2id_map[entity_type]
+                if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
+                    entity_type = row['entity_type'][2:]
+                else:
+                    entity_type = row['entity_type']
+            if args.binary_eval:
+                text_pred[row['start']:row['stop']] = 1
+            else:
+                try:
+                    text_pred[row['start']:row['stop']] = label2id_map[
+                        entity_type.upper()]
+                except KeyError:
+                    label_map = {
+                        'age': 'AGE',
+                        'date': 'DATE',
+                        'email': 'CONTACT',
+                        'idnum': 'ID',
+                        'initials': 'NAME',
+                        'location': 'LOCATION',
+                        'mrn': 'ID',
+                        'name': 'NAME',
+                        'pager': 'ID',
+                        'ssn': 'ID',
+                        'telephone': 'CONTACT',
+                        'unit': 'ID',
+                        'url': 'CONTACT'
+                    }
+                    transformed_label = label_map[entity_type.lower()]
+                    text_pred[row['start']:row['stop']] = label2id_map[
+                        transformed_label]
 
         curr_performance = {}
         curr_performance['n_char'] = len(text)
@@ -437,13 +525,21 @@ def main():
         curr_performance['n_token_tp'] = len(tp_list)
         curr_performance['n_token_fp'] = len(fp_list)
         curr_performance['n_token_fn'] = len(fn_list)
+        if args.multi_eval:
+            token_type_eval(
+                phi_tokens_true, tp_list, fp_list, fn_list, id2label_map,
+                curr_performance
+            )
 
         fp_list_entity, fn_list_entity = None, None
         # report performance entity-wise (only when label is transformed)
         if args.bio:
-            df = merge_BIO_pred(df, args.binary, args.expand_eval, text)
-            if args.binary:
+            df = merge_BIO_pred(
+                df, args.binary_eval, args.expand_eval, text, label2id_map
+            )
+            if args.binary_eval:
                 gs['entity_type'] = 'phi'
+                df['entity_type'] = 'phi'
             # ignore punctuation punshiment at front/end
             true = utils.ignore_partials(utils.get_entities(gs))
             pred = utils.ignore_partials(utils.get_entities(df))
@@ -493,7 +589,7 @@ def main():
                     log_text[key] += "\n"
                     if (',' in token) or ("\n" in token) or ('"' in token):
                         token = '"' + token.replace('"', '""') + '"'
-                    label = id2label_map[label]
+                    # label = id2label_map[label]
                     log_text[key] += f'{fn},,{start},{stop},{token},{label},\n'
 
         perf_all[fn] = curr_performance
@@ -503,7 +599,7 @@ def main():
     # convert to dataframe
     df = pd.DataFrame.from_dict(perf_all, orient='index')
 
-    print(df)
+    #print (df)
     # print ("\nFalse negatives:")
     # for fn in fn_all:
     #     print (fn)
@@ -512,17 +608,47 @@ def main():
     #     print (fp)
     # print('\n')
 
+    final_stats = {}
     # summary stats
     se, ppv, f1 = utils.compute_stats(df, True, False)
     print(f'Token Macro Se: {se.mean():0.4f}')
     print(f'Token Macro P+: {ppv.mean():0.4f}')
     print(f'Token Macro F1: {f1.mean():0.4f}')
+    final_stats['token_macro'] = [
+        round(se.mean(), 4),
+        round(ppv.mean(), 4),
+        round(f1.mean(), 4)
+    ]
 
     se, ppv, f1 = utils.compute_stats(df, True, True)
     print(f'Token Micro Se: {se.mean():0.4f}')
     print(f'Token Micro P+: {ppv.mean():0.4f}')
     print(f'Token Micro F1: {f1.mean():0.4f}')
+    final_stats['token_micro'] = [
+        round(se.mean(), 4),
+        round(ppv.mean(), 4),
+        round(f1.mean(), 4)
+    ]
 
+    if args.multi_eval:
+        token_stats = utils.compute_token_type_stats(df, True, True, label_list)
+        for label in token_stats.keys():
+            se, ppv, f1 = token_stats[label]
+            print(f'Label {label}')
+            print(f'Token Micro Se: {se.mean():0.4f}')
+            print(f'Token Micro P+: {ppv.mean():0.4f}')
+            print(f'Token Micro F1: {f1.mean():0.4f}')
+            final_stats[f'Token Micro {label}'] = [
+                round(se.mean(), 4),
+                round(ppv.mean(), 4),
+                round(f1.mean(), 4)
+            ]
+
+    if stats_path is not None:
+        final_stats = pd.DataFrame.from_dict(
+            final_stats, orient='index', columns=['Se', 'P+', 'F1']
+        )
+        final_stats.to_csv(stats_path)
     if args.bio:
         se, ppv, f1 = utils.compute_stats(df, False, False)
         print(f'Entity Macro Se: {se.mean():0.4f}')
@@ -542,16 +668,6 @@ def main():
 
     if csv_path is not None:
         df.to_csv(csv_path)
-
-    print('length', len(true_labels))
-    print('n phi tokens: ', sum(df['n_token_phi']))
-    tokens_report = classification_report(
-        true_labels, pred_labels, labels=label_list, digits=4
-    )
-    print("**** token report *****")
-    print(tokens_report)
-    # with open('/home/jingglin/research/data/pred/i2b2_2014/token_log/test/token_report.json', 'w') as json_file:
-    #     json.dumps(tokens_report, sort_keys=True, indent=4, separators=(',', ': '))
 
 
 if __name__ == "__main__":

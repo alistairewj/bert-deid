@@ -23,6 +23,7 @@ from transformers import (
     BertConfig,
     BertForTokenClassification,
     BertTokenizer,
+    BertTokenizerFast,
     BertModel,
     CamembertConfig,
     CamembertForTokenClassification,
@@ -30,9 +31,11 @@ from transformers import (
     DistilBertConfig,
     DistilBertForTokenClassification,
     DistilBertTokenizer,
+    DistilBertTokenizerFast,
     RobertaConfig,
     RobertaForTokenClassification,
     RobertaTokenizer,
+    RobertaTokenizerFast,
     XLMRobertaConfig,
     XLMRobertaForTokenClassification,
     XLMRobertaTokenizer,
@@ -40,20 +43,22 @@ from transformers import (
 )
 
 # custom class written for albert token classification
-from bert_deid import tokenization, processors
+from bert_deid.modeling import AlbertForTokenClassification
+from bert_deid import new_tokenization, processors
+from bert_deid.BERT_CRF import BertCRF
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
-from bert_deid.model.albert import AlbertForTokenClassification
-from bert_deid.model.crf import BertCRF
-from bert_deid.model.extra_feature import ModelExtraFeature
+from bert_deid.extra_feature import ModelExtraFeature
+from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
-    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
-    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
+    "bert": (BertConfig, BertForTokenClassification, BertTokenizerFast),
+    "roberta":
+        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
-            DistilBertTokenizer
+            DistilBertTokenizerFast
         ),
     "camembert":
         (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
@@ -62,8 +67,11 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    'bert_crf': (BertConfig, BertModel, BertTokenizer),
-    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizer)
+    'bert_crf': (BertConfig, BertCRF, BertTokenizerFast),
+    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizerFast),
+    'bert_extra_feature_crf':
+        (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
+    'biobert': (BertConfig, BertForTokenClassification, BertTokenizerFast),
 }
 
 logger = logging.getLogger(__name__)
@@ -96,8 +104,11 @@ class Transformer(object):
     def __init__(
         self,
         model_path,
+        # token_step_size=100,
+        # sequence_length=100,
+        max_seq_length=128,
         device='cpu',
-        patterns=None,
+        patterns=[],
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
         self.num_labels = len(self.label_set.label_list)
@@ -121,29 +132,16 @@ class Transformer(object):
         config_class, model_class, tokenizer_class = MODEL_CLASSES[
             self.model_type]
 
-        if self.model_type == 'bert_crf':
-            # use pretrained bert model path to initialize BertCRF object
-            new_model_path = training_args.model_name_or_path
-        else:
-            new_model_path = model_path
         # Use cross entropy ignore index as padding label id so
         # that only real label ids contribute to the loss later
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
         # initialize the model
-        self.config = config_class.from_pretrained(new_model_path)
-        self.tokenizer = tokenizer_class.from_pretrained(new_model_path)
-        model_param = {'pretrained_model_name_or_path': new_model_path}
-        if self.model_type == 'bert_extra_feature':
+        self.config = config_class.from_pretrained(model_path)
+        self.tokenizer = tokenizer_class.from_pretrained(model_path)
+        model_param = {'pretrained_model_name_or_path': model_path}
+        if model_type == 'bert_extra_feature' or model_type == 'bert_extra_feature_crf':
             model_param['num_features'] = len(self.patterns)
         self.model = model_class.from_pretrained(**model_param)
-
-        if self.model_type == 'bert_crf':
-            self.model = BertCRF(
-                num_classes=self.num_labels,
-                bert_model=self.model,
-                device=device
-            )
-            self.model.from_pretrained(model_path)
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
@@ -214,8 +212,12 @@ class Transformer(object):
         # in this case we have a length 1 example
         # we use the SHA-256 hash of the text as the globally unique identifier
         guid = sha256(text.encode()).hexdigest()
-        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
-        features = tokenization.convert_examples_to_features(
+        examples = [
+            processors.InputExample(
+                guid=guid, text=text, labels=None, patterns=self.patterns
+            )
+        ]
+        features = new_tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
             self.max_seq_length,
@@ -284,7 +286,7 @@ class Transformer(object):
                         batch[2]
                         if self.model_type in ["bert", "xlnet"] else None
                     )  # XLM and RoBERTa don"t use segment_ids
-                if self.model_type == 'bert_extra_feature':
+                if self.model_type == 'bert_extra_feature' or self.model_type == 'bert_extra_feature_crf':
                     inputs['extra_features'] = batch[4]
                 outputs = self.model(**inputs)
                 _, batch_logits = outputs[:2]
@@ -293,12 +295,8 @@ class Transformer(object):
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
             batch_logits = batch_logits.detach().cpu().numpy()
             batch_size, seq_len = batch_logits.shape[:2]
-            if self.model_type == 'bert_crf':
+            if self.model_type == 'bert_crf' or self.model_type == 'bert_extra_feature_crf':
                 # BertCRF disregard first and last token,
-                pad_logits = np.ones((batch_size, 1)) * self.pad_token_label_id
-                batch_logits = np.concatenate(
-                    (pad_logits, batch_logits, pad_logits), axis=1
-                )
                 # BertCRF only gives a label prediction
                 # broadcast to (,,num_label) to match to BERT output
                 batch_logits = np.expand_dims(batch_logits, axis=2)

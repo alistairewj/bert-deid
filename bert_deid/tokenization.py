@@ -112,6 +112,11 @@ def tokenize_with_labels(
         # more recent tokenizers add a special chars where a whitespace prefixed a word
         # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
         special_characters = b'\xe2\x96\x81'.decode('utf-8')
+    elif tokenizer_type in (
+        'RobertaTokenizer'
+    ):
+        # add Ġ where a whitespace prefixed a word 
+        special_characters = b'\xc4\xa0'.decode('utf-8')
     else:
         raise ValueError(f'Unrecognized tokenizer {tokenizer_type}')
 

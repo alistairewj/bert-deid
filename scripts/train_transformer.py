@@ -36,19 +36,21 @@ from tqdm import tqdm, trange
 
 from transformers import (
     WEIGHTS_NAME, AdamW, AlbertConfig, AlbertTokenizer, BertConfig,
-    BertForTokenClassification, BertTokenizer, BertModel, CamembertConfig,
-    CamembertForTokenClassification, CamembertTokenizer, DistilBertConfig,
-    DistilBertForTokenClassification, DistilBertTokenizer, RobertaConfig,
-    RobertaForTokenClassification, RobertaTokenizer, XLMRobertaConfig,
+    BertForTokenClassification, BertTokenizer, BertTokenizerFast, BertModel,
+    CamembertConfig, CamembertForTokenClassification, CamembertTokenizer,
+    DistilBertConfig, DistilBertForTokenClassification, DistilBertTokenizer,
+    DistilBertTokenizerFast, RobertaConfig, RobertaForTokenClassification,
+    RobertaTokenizer, RobertaTokenizerFast, XLMRobertaConfig,
     XLMRobertaForTokenClassification, XLMRobertaTokenizer,
     get_linear_schedule_with_warmup, AutoConfig, AutoModelWithLMHead,
     AutoTokenizer, AutoModel
 )
 # custom class written for albert token classification
-from bert_deid import processors, tokenization
-from bert_deid.model.albert import AlbertForTokenClassification
-from bert_deid.model.crf import BertCRF
-from bert_deid.model.extra_feature import ModelExtraFeature
+from bert_deid.modeling import AlbertForTokenClassification
+from bert_deid import processors, new_tokenization
+from bert_deid.BERT_CRF import BertCRF
+from bert_deid.extra_feature import ModelExtraFeature
+from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 
 # PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
@@ -79,12 +81,13 @@ ALL_MODELS = sum(
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
-    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
-    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
+    "bert": (BertConfig, BertForTokenClassification, BertTokenizerFast),
+    "roberta":
+        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
-            DistilBertTokenizer
+            DistilBertTokenizerFast
         ),
     "camembert":
         (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
@@ -93,8 +96,10 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    "bert_crf": (BertConfig, BertModel, BertTokenizer),
-    "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizer),
+    "bert_crf": (BertConfig, BertCRF, BertTokenizerFast),
+    "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizerFast),
+    "bert_extra_feature_crf":
+        (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
 }
 
 
@@ -507,10 +512,10 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
     if os.path.exists(args.model_name_or_path):
         # set global_step to gobal_step of last saved checkpoint from model path
         global_step = args.model_name_or_path.split("-")[-1].split("/")[0]
-        if global_step == '':
-            global_step = 0
-        else:
+        try:
             global_step = int(global_step)
+        except:
+            global_step = 0
 
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps
@@ -562,7 +567,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                 inputs["token_type_ids"] = (
                     batch[2] if args.model_type in ["bert", "xlnet"] else None
                 )  # XLM and RoBERTa don"t use segment_ids
-            if args.model_type == "bert_extra_feature":
+            if args.model_type == "bert_extra_feature" or args.model_type == "bert_extra_feature_crf":
                 inputs["extra_features"] = batch[4]
 
             outputs = model(**inputs)
@@ -594,8 +599,8 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                         model.parameters(), args.max_grad_norm
                     )
 
-                scheduler.step()  # Update learning rate schedule
                 optimizer.step()
+                scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
                 global_step += 1
 
@@ -628,7 +633,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                             )
                     tb_writer.add_scalar(
                         "lr",
-                        scheduler.get_lr()[0], global_step
+                        scheduler.get_last_lr()[0], global_step
                     )
                     tb_writer.add_scalar(
                         "loss", (tr_loss - logging_loss) / args.logging_steps,
@@ -729,7 +734,7 @@ def evaluate(
                     batch[2] if args.model_type in ["bert", "xlnet"] else None
                 )  # XLM and RoBERTa don"t use segment_ids
 
-            if args.model_type == "bert_extra_feature":
+            if args.model_type == "bert_extra_feature" or args.model_type == "bert_extra_feature_crf":
                 inputs["extra_features"] = batch[4]
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
@@ -742,7 +747,7 @@ def evaluate(
         nb_eval_steps += 1
 
         logits = logits.detach().cpu().numpy()
-        if args.model_type == 'bert_crf':
+        if args.model_type == 'bert_crf' or args.model_type == 'bert_extra_feature_crf':
             logits = logits.astype(int)
         if preds is None:
             preds = logits
@@ -754,7 +759,7 @@ def evaluate(
             )
 
     eval_loss = eval_loss / nb_eval_steps
-    if args.model_type != 'bert_crf':
+    if args.model_type != 'bert_crf' and args.model_type != 'bert_extra_feature_crf':
         preds = np.argmax(preds, axis=2)
 
     labels = processor.label_set.label_list
@@ -812,9 +817,8 @@ def load_and_cache_examples(
         logger.info("Creating features from dataset file at %s", args.data_dir)
 
         # get examples (mode can be 'train', 'test', or 'val')
-        examples = processor.get_examples(mode)
-
-        features = tokenization.convert_examples_to_features(
+        examples = processor.get_examples(mode, patterns)
+        features = new_tokenization.convert_examples_to_features(
             examples,
             processor.label_set.label_to_id,
             args.max_seq_length,
@@ -945,24 +949,23 @@ def main():
     # if requested, we can add binary features tagged by pydeid
     # this has a dependency on pydeid
     if args.feature is not None:
-        from bert_deid.pydeid_feature import apply_pydeid_to_text
-        get_additional_features = lambda x: apply_pydeid_to_text(
-            x, patterns=args.feature
-        )
-        logger.info(f"Adding features: {', '.join(args.feature)}.")
-    else:
-        if args.model_type == 'bert_extra_feature':
+        for f in args.feature:
+            f = f.lower()
+            if f not in _PATTERN_NAMES:
+                raise ValueError("Invalid feature name")
+            args.patterns.append(f)
+    if 'all' in args.patterns:
+        args.patterns = PATTERN_NAMES
+
+    logger.info(
+        "********** additional feature {} **********".format(args.patterns)
+    )
+
+    if args.model_type == 'bert_extra_feature' or args.model_type == 'bert_extra_feature_crf':
+        if len(args.patterns) == 0:
             raise ValueError(
                 "Add pydeid pattern to perform bert-feature ensemble"
             )
-        get_additional_features = None
-
-    processor = processors.DeidProcessor(
-        args.data_dir, label_set, get_additional_features
-    )
-
-    # labels = processor.label_set.label_list
-    # label_map = processor.label_set.label_to_id
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
@@ -981,6 +984,7 @@ def main():
     )
 
     tokenizer_name = args.tokenizer_name if args.tokenizer_name else args.model_name_or_path
+    print('tokenizer name', tokenizer_name)
     tokenizer = tokenizer_class.from_pretrained(
         tokenizer_name,
         do_lower_case=args.do_lower_case,
@@ -994,26 +998,10 @@ def main():
         'cache_dir': args.cache_dir if args.cache_dir else None
     }
 
-    if args.model_type == 'bert_extra_feature':
-        model_params['num_features'] = len(args.feature)
+    if args.model_type == 'bert_extra_feature' or args.model_type == 'bert_extra_feature_crf':
+        model_params['num_features'] = len(args.patterns)
 
     model = model_class.from_pretrained(**model_params)
-
-    # model = model_class.from_pretrained(
-    #     args.model_name_or_path,
-    #     from_tf=bool(".ckpt" in args.model_name_or_path),
-    #     config=config,
-    #     cache_dir=args.cache_dir if args.cache_dir else None,
-    # )
-
-    # label2id = processor.label_set.label_to_id
-    if args.model_type == 'bert_crf':
-        model = BertCRF(
-            num_classes=args.num_labels,
-            bert_model=model,
-            device=args.device,
-            dropout=args.crf_dropout
-        )
 
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later

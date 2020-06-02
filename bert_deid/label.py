@@ -296,7 +296,8 @@ class LabelCollection(object):
             ]
 
         # transform the labels as appropriate
-        self.transform_labels()
+        if len(self.labels) > 0:
+            self.transform_labels()
 
     def from_list(self, labels):
         self.labels = labels
@@ -307,7 +308,8 @@ class LabelCollection(object):
                 )
 
         # transform the labels if the user has requested it
-        self.transform_labels()
+        if len(self.labels) > 0:
+            self.transform_labels()
 
     def sort_labels(self):
         if self.labels is not None:
