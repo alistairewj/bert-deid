@@ -134,7 +134,6 @@ class CoNLLProcessor(DataProcessor):
 
                     label_new = label[j]
 
-
                     label_offsets.append([label_new, s_len, len(l)])
                     # +1 to account for the whitespaces we insert below
                     s_len += len(l) + 1
@@ -143,7 +142,10 @@ class CoNLLProcessor(DataProcessor):
                 sentence = ' '.join(sentence)
                 examples.append(
                     InputExample(
-                        guid=guid, text=sentence, labels=label_offsets, patterns=patterns
+                        guid=guid,
+                        text=sentence,
+                        labels=label_offsets,
+                        patterns=patterns
                     )
                 )
                 sentence = []
@@ -182,7 +184,8 @@ class DeidProcessor(DataProcessor):
             if not f.endswith('.txt'):
                 continue
 
-            guid = "%s-%s" % (set_type, f[:-4])
+            # guid = "%s-%s" % (set_type, f[:-4])
+            guid = f[:-4]
             with open(os.path.join(txt_path, f), 'r') as fp:
                 text = ''.join(fp.readlines())
 
@@ -196,7 +199,10 @@ class DeidProcessor(DataProcessor):
             self.label_set.from_csv(fn)
             examples.append(
                 InputExample(
-                    guid=guid, text=text, labels=self.label_set.labels, patterns=patterns
+                    guid=guid,
+                    text=text,
+                    labels=self.label_set.labels,
+                    patterns=patterns
                 )
             )
 

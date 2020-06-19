@@ -44,7 +44,7 @@ from transformers import (
 
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import new_tokenization, processors
+from bert_deid import new_tokenization as tokenization, processors
 from bert_deid.BERT_CRF import BertCRF
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
 from bert_deid.extra_feature import ModelExtraFeature
@@ -53,7 +53,8 @@ from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
     "bert": (BertConfig, BertForTokenClassification, BertTokenizerFast),
-    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
+    "roberta":
+        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
@@ -66,9 +67,10 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    'bert_crf': (BertConfig, BertCRF, BertTokenizerFast), 
+    'bert_crf': (BertConfig, BertCRF, BertTokenizerFast),
     'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizerFast),
-    'bert_extra_feature_crf': (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
+    'bert_extra_feature_crf':
+        (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
     'biobert': (BertConfig, BertForTokenClassification, BertTokenizerFast),
 }
 
@@ -106,7 +108,7 @@ class Transformer(object):
         # token_step_size=100,
         # sequence_length=100,
         max_seq_length=128,
-        device='cpu', 
+        device='cpu',
         patterns=[],
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
@@ -133,11 +135,10 @@ class Transformer(object):
         # initialize the model
         self.config = config_class.from_pretrained(model_path)
         self.tokenizer = tokenizer_class.from_pretrained(model_path)
-        model_param = {'pretrained_model_name_or_path':model_path}
+        model_param = {'pretrained_model_name_or_path': model_path}
         if model_type == 'bert_extra_feature' or model_type == 'bert_extra_feature_crf':
             model_param['num_features'] = len(self.patterns)
         self.model = model_class.from_pretrained(**model_param)
-
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
@@ -190,7 +191,9 @@ class Transformer(object):
 
         return examples
 
-    def predict(self, text, batch_size=8):
+    def predict(
+        self, text, document_id, num_subwords, num_tokens, batch_size=8
+    ):
         # args, model, tokenizer, processor, pad_token_label_id, mode="test"
         # sets the model to evaluation mode to fix parameters
         self.model.eval()
@@ -207,9 +210,14 @@ class Transformer(object):
 
         # in this case we have a length 1 example
         # we use the SHA-256 hash of the text as the globally unique identifier
-        guid = sha256(text.encode()).hexdigest()
-        examples = [processors.InputExample(guid=guid, text=text, labels=None, patterns=self.patterns)]
-        features = new_tokenization.convert_examples_to_features(
+        # guid = sha256(text.encode()).hexdigest()
+        guid = document_id
+        examples = [
+            processors.InputExample(
+                guid=guid, text=text, labels=None, patterns=self.patterns
+            )
+        ]
+        features = tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
             self.max_seq_length,
@@ -246,8 +254,20 @@ class Transformer(object):
             [f.extra_feature for f in features], dtype=torch.long
         )
 
+        # find subwords proportion:
+        total = 0
+        non_pad_tokens = 0
+        for f in features:
+            total += np.count_nonzero(np.array(f.input_subwords))
+            non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
+        non_pad_tokens -= 2 * len(features)
+        num_subwords += total
+        num_tokens += non_pad_tokens
+        # print (f'Prediction: Number of subwords: {total} out of number of tokens {non_pad_tokens}')
+
         eval_dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_extra_features
+            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+            all_extra_features
         )
         eval_sampler = SequentialSampler(eval_dataset)
         eval_dataloader = DataLoader(
@@ -284,8 +304,7 @@ class Transformer(object):
             batch_logits = batch_logits.detach().cpu().numpy()
             batch_size, seq_len = batch_logits.shape[:2]
             if self.model_type == 'bert_crf' or self.model_type == 'bert_extra_feature_crf':
-                # BertCRF disregard first and last token,
-                # BertCRF only gives a label prediction 
+                # BertCRF only gives a label prediction
                 # broadcast to (,,num_label) to match to BERT output
                 batch_logits = np.expand_dims(batch_logits, axis=2)
                 batch_logits = batch_logits.astype(int)
@@ -293,21 +312,19 @@ class Transformer(object):
                 logits = batch_logits
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
-                logits = np.append(
-                    logits, batch_logits, axis=0
-                )
+                logits = np.append(logits, batch_logits, axis=0)
                 out_label_ids = np.append(
                     out_label_ids,
                     inputs["labels"].detach().cpu().numpy(),
                     axis=0
                 )
- 
 
         # re-align the predictions with the original text
         preds, offsets, lengths = [], [], []
         for f, feature in enumerate(features):
             # get predictions for only the kept labels
-            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id)[0]
+            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id
+                              )[0]
             preds.append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
             offsets.extend(
@@ -347,4 +364,4 @@ class Transformer(object):
         lengths = [x for i, x in enumerate(lengths) if i in unique_idx]
         preds = preds[unique_idx, :]
 
-        return preds, lengths, offsets
+        return preds, lengths, offsets, num_subwords, num_tokens

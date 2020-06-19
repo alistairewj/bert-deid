@@ -5,13 +5,13 @@ import logging
 import os
 import unicodedata
 import itertools
-from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
+from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector, find_phi_location_philter
 
 import numpy as np
 from tokenizers import (
-    ByteLevelBPETokenizer, 
-    SentencePieceBPETokenizer, 
-    BertWordPieceTokenizer)
+    ByteLevelBPETokenizer, SentencePieceBPETokenizer, BertWordPieceTokenizer
+)
+import pandas as pd
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -19,6 +19,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# philter_pred = '/home/jingglin/research/philter/all/test/pred/'
+
 
 class InputFeatures(object):
     """Features are directly input to the transformer model."""
@@ -46,25 +49,47 @@ class InputFeatures(object):
         self.extra_feature = extra_feature
 
 
-def tokenize_with_labels(tokenizer, example, label_to_id, pad_token_label_id=-100, default_label='O'):
+def tokenize_with_labels(
+    tokenizer,
+    example,
+    label_to_id,
+    pad_token_label_id=-100,
+    default_label='O'
+):
     ## TODO: update code for all tokenizer without fast
-    text = example.text 
-    labels = example.labels 
+    text = example.text
+    labels = example.labels
 
     # determine the type of tokenizer
     tokenizer_type = tokenizer.__class__.__name__
     if tokenizer_type == 'RobertaTokenizerFast':
         text = text.replace("\n", " ")
 
-
-    encoding = tokenizer.encode_plus(text, add_special_tokens=False, return_offsets_mapping=True)
+    encoding = tokenizer.encode_plus(
+        text, add_special_tokens=False, return_offsets_mapping=True
+    )
     ex_ids, ex_offsets = encoding['input_ids'], encoding['offset_mapping']
     ex_tokens = tokenizer.tokenize(text)
-    
+
+    if tokenizer_type == 'RobertaTokenizerFast':
+        ids_to_keep = []
+        new_ex_tokens = []
+        for i, token in enumerate(ex_tokens):
+            if token != b'\xc4\xa0'.decode('utf-8'):
+                new_ex_tokens.append(token)
+                ids_to_keep.append(i)
+
+        ex_tokens = new_ex_tokens[:]
+        ex_ids = np.array(ex_ids)[ids_to_keep].tolist()
+        ex_offsets = np.array(ex_offsets)[ids_to_keep].tolist()
+
     # get subword vectors
     ex_subwords = []
     for token in ex_tokens:
-        if token.startswith('##') and tokenizer_type in ('BertTokenizerFast', 'DistilBertTokenizerFast'):
+        # ex_subwords.append(False)
+        if token.startswith('##') and tokenizer_type in (
+            'BertTokenizerFast', 'DistilBertTokenizerFast'
+        ):
             # bert/distilbert add two hashes before sub-words
             ex_subwords.append(True)
         elif not token.startswith(b'\xe2\x96\x81'.decode('utf-8')) and \
@@ -73,22 +98,25 @@ def tokenize_with_labels(tokenizer, example, label_to_id, pad_token_label_id=-10
             # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
             ex_subwords.append(True)
         elif tokenizer_type in ('RobertaTokenizerFast'):
-            # add Ġ where a whitespace prefixed a word 
-            if token != b'\xc4\xa0'.decode('utf-8') and not token.startswith(b'\xc4\xa0'.decode('utf-8')):
+            # # add Ġ where a whitespace prefixed a word
+            if token != b'\xc4\xa0'.decode('utf-8') and not token.startswith(
+                b'\xc4\xa0'.decode('utf-8')
+            ):
                 ex_subwords.append(True)
             else:
                 ex_subwords.append(False)
         else:
             ex_subwords.append(False)
-            
+
     # get token labels
     ex_labels = [
-            pad_token_label_id if sw else default_label for sw in ex_subwords
-        ]
+        pad_token_label_id if sw else default_label for sw in ex_subwords
+    ]
 
     ex_label_ids = [
         label_to_id[l] if l != pad_token_label_id else pad_token_label_id
-        for l in ex_labels]
+        for l in ex_labels
+    ]
 
     # when building examples for model evaluation, there are no labels
     if labels is None:
@@ -112,14 +140,16 @@ def tokenize_with_labels(tokenizer, example, label_to_id, pad_token_label_id=-10
 
     ex_label_ids = [
         label_to_id[l] if l != pad_token_label_id else pad_token_label_id
-        for l in ex_labels]
+        for l in ex_labels
+    ]
 
     assert len(ex_ids) == len(ex_tokens)
     assert len(ex_offsets) == len(ex_tokens)
     assert len(ex_subwords) == len(ex_tokens)
     assert len(ex_label_ids) == len(ex_tokens)
-            
+
     return ex_ids, ex_tokens, ex_offsets, ex_subwords, ex_label_ids
+
 
 def convert_examples_to_features(
     examples,
@@ -139,7 +169,6 @@ def convert_examples_to_features(
     mask_padding_with_zero=True,
     feature_overlap=None,
 ):
-
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -171,12 +200,24 @@ def convert_examples_to_features(
         pattern_label = 1
         ex_phi_locs = []
         for pattern in patterns:
-            ex_phi_locs.append(find_phi_location(pattern, pattern_label, example.text))
+            ex_phi_locs.append(
+                find_phi_location(pattern, pattern_label, example.text)
+            )
+        
+        # phi found by philter
+        # TODO: update code to find phi use original text doc
+        # document_id = example.guid
+        # path = f'{philter_pred}{document_id}.pred'
+        # df = pd.read_csv(path, index_col=0)
+        # ex_phi_locs.append(find_phi_location_philter(df, example.text))
 
         assert (len(patterns) == len(ex_phi_locs))
 
         ex_ids, ex_tokens, ex_offsets, ex_subwords, ex_label_ids = tokenize_with_labels(
-            tokenizer, example, label_to_id, pad_token_label_id=pad_token_label_id
+            tokenizer,
+            example,
+            label_to_id,
+            pad_token_label_id=pad_token_label_id
         )
 
         n_tokens = len(ex_ids)
@@ -195,7 +236,8 @@ def convert_examples_to_features(
             tokens = ex_tokens[t:t + max_seq_length - special_tokens_count]
             offsets = ex_offsets[t:t + max_seq_length - special_tokens_count]
             subwords = ex_subwords[t:t + max_seq_length - special_tokens_count]
-            label_ids = ex_label_ids[t:t + max_seq_length - special_tokens_count]
+            label_ids = ex_label_ids[t:t + max_seq_length -
+                                     special_tokens_count]
 
             # The convention in BERT is:
             # (a) For sequence pairs:
@@ -222,7 +264,7 @@ def convert_examples_to_features(
             subwords += [False]
             label_ids += [pad_token_label_id]
             segment_ids = [sequence_a_segment_id] * len(tokens)
-            
+
             if cls_token_at_end:
                 # for XLNet [cls] at the end
                 input_ids += [cls_token_id]
@@ -238,12 +280,11 @@ def convert_examples_to_features(
                 subwords = [False] + subwords
                 label_ids = [pad_token_label_id] + label_ids
                 segment_ids = [cls_token_segment_id] + segment_ids
-                
-            
+
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
             input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
-            
+
             # Zero-pad up to the sequence length.
             padding_length = max_seq_length - len(input_ids)
             if pad_on_left:
@@ -267,13 +308,15 @@ def convert_examples_to_features(
                 offsets += [(-1, -1)] * padding_length
                 subwords += [False] * padding_length
 
+            starts = [start for start, _ in offsets]
+            lengths = [stop - start for start, stop in offsets]
+
             extra_features = []
             for i in range(len(ex_phi_locs)):
-                extra_feature = create_extra_feature_vector(ex_phi_locs[i], offsets, lengths, token_sw)
+                extra_feature = create_extra_feature_vector(
+                    ex_phi_locs[i], starts, lengths, subwords
+                )
                 extra_features.append(extra_feature)
-
-            starts = [start for start, _ in offsets]
-            lengths = [stop-start for start, stop in offsets]
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
@@ -307,7 +350,10 @@ def convert_examples_to_features(
                 )
                 logger.info("offsets: %s", " ".join([str(x) for x in starts]))
                 for each_feature in extra_features:
-                    logger.info('extra feature: %s', ' '.join([str(x) for x in each_feature]))
+                    logger.info(
+                        'extra feature: %s',
+                        ' '.join([str(x) for x in each_feature])
+                    )
 
             features.append(
                 InputFeatures(
@@ -323,9 +369,3 @@ def convert_examples_to_features(
             )
             n_obs += 1
     return features
-
-
-        
-
-
-

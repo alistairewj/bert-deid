@@ -11,8 +11,15 @@ LABEL_MEMBERSHIP = {
             [
                 'NAME',
                 [
-                    'NAME', 'DOCTOR', 'PATIENT', 'USERNAME', 'HCPNAME',
-                    'RELATIVEPROXYNAME', 'PTNAME', 'PTNAMEINITIAL', 'KEYVALUE',
+                    'NAME',
+                    'DOCTOR',
+                    'PATIENT',
+                    'USERNAME',
+                    'HCPNAME',
+                    'RELATIVEPROXYNAME',
+                    'PTNAME',
+                    'PTNAMEINITIAL',
+                    'KEYVALUE',
                 ]
             ], ['PROFESSION', ['PROFESSION']],
             [
@@ -41,8 +48,13 @@ LABEL_MEMBERSHIP = {
             [
                 'NAME',
                 [
-                    'NAME', 'PATIENT', 'USERNAME', 'RELATIVEPROXYNAME',
-                    'PTNAME', 'PTNAMEINITIAL', 'KEYVALUE',
+                    'NAME',
+                    'PATIENT',
+                    'USERNAME',
+                    'RELATIVEPROXYNAME',
+                    'PTNAME',
+                    'PTNAMEINITIAL',
+                    'KEYVALUE',
                 ]
             ],
             [
@@ -77,8 +89,8 @@ LABEL_MEMBERSHIP = {
             [
                 'O',
                 [
-                    'DOCTOR', 'HCPNAME',
-                    'PROFESSION', 'STATE', 'COUNTRY', 'NATIONALITY', 'O'
+                    'DOCTOR', 'HCPNAME', 'PROFESSION', 'STATE', 'COUNTRY',
+                    'NATIONALITY', 'O'
                 ]
             ]
         ],
@@ -136,6 +148,22 @@ LABEL_MEMBERSHIP = {
         ]
 }
 
+PYDEID_FEATURE2LABEL = {
+    'age': 'AGE',
+    'date': 'DATE',
+    'email': 'CONTACT',
+    'idnum': 'ID',
+    'initials': 'NAME',
+    'location': 'LOCATION',
+    'mrn': 'ID',
+    'name': 'NAME',
+    'pager': 'ID',
+    'ssn': 'ID',
+    'telephone': 'CONTACT',
+    'unit': 'ID',
+    'url': 'CONTACT'
+}
+
 
 # convert the lists within each dictionary to a dict
 def create_label_map(LABEL_MEMBERSHIP):
@@ -180,8 +208,9 @@ class Label(object):
 
     def overlaps(self, start, stop):
         """Returns true if any label contains the start/stop offset."""
-        contains_start = (self.start >= start) & (self.start  < stop)
-        contains_stop = ((self.start + self.length) >= start) & ((self.start + self.length) < stop)
+        contains_start = (self.start >= start) & (self.start < stop)
+        contains_stop = ((self.start + self.length) >=
+                         start) & ((self.start + self.length) < stop)
         return contains_start | contains_stop
 
 
@@ -218,7 +247,9 @@ class LabelCollection(object):
         #     )
         #     self.label_list.sort()
         if self.transform is not None:
-            self.label_list = list(l for l, _ in LABEL_MEMBERSHIP[self.transform])
+            self.label_list = list(
+                l for l, _ in LABEL_MEMBERSHIP[self.transform]
+            )
             self.label_list.sort()
 
         # enforce 'O' to be first label in all cases

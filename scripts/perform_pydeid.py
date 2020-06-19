@@ -5,7 +5,7 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 import argparse
-import pkgutil 
+import pkgutil
 import pydeid
 
 logger = logging.getLogger()
@@ -16,9 +16,9 @@ from pydeid.annotators import Pattern
 from pydeid.annotation import Document, EntityType
 # load all modules on path
 pkg = 'pydeid.annotators._patterns'
-PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    _patterns.__path__
-)]
+PATTERN_NAMES = [
+    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
+]
 PATTERN_NAMES.remove('_pattern')
 _PATTERN_NAMES = PATTERN_NAMES + ['all']
 
@@ -40,7 +40,7 @@ if __name__ == '__main__':
         default=None,
         choices=_PATTERN_NAMES,
         help="Perform rule-based approach with pydeid patterns: "
-            f"{', '.join(_PATTERN_NAMES)}"
+        f"{', '.join(_PATTERN_NAMES)}"
     )
     parser.add_argument(
         "--output_folder",
@@ -88,23 +88,32 @@ if __name__ == '__main__':
         with open(data_path / 'txt' / f, 'r') as fp:
             text = ''.join(fp.readlines())
 
-        
         doc = Document(text)
         txt_annotated = model.annotate(doc)
 
-        document_id=f'{f[:-4]}' 
-        annotation_df = pd.DataFrame(columns=[
-            'document_id', 'annotation_id', 'start', 'stop', 'entity',
-            'entity_type', 'comment'
-        ])
+        document_id = f'{f[:-4]}'
+        annotation_df = pd.DataFrame(
+            columns=[
+                'document_id', 'annotation_id', 'start', 'stop', 'entity',
+                'entity_type', 'comment'
+            ]
+        )
         for ann in txt_annotated.annotations:
-            start, stop = ann.start, ann.end 
+            start, stop = ann.start, ann.end
             entity = ann.entity[0]
             entity_type = ann.entity_type
-            annotation_df = annotation_df.append({"document_id":document_id, "annotation_id":"",
-            "start":start,"stop":stop,"entity":entity, "entity_type":entity_type,"cooment":""}, ignore_index=True)
-
-
+            annotation_df = annotation_df.append(
+                {
+                    "document_id": document_id,
+                    "annotation_id": "",
+                    "start": start,
+                    "stop": stop,
+                    "entity": entity,
+                    "entity_type": entity_type,
+                    "cooment": ""
+                },
+                ignore_index=True
+            )
 
         if output_folder is not None:
             annotation_df.to_csv(output_folder / f'{f[:-4]}.pred', index=False)
