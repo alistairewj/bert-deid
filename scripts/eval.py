@@ -5,7 +5,10 @@ import os
 import re
 import string
 import csv
+<<<<<<< HEAD
 from copy import deepcopy
+=======
+>>>>>>> 742a723... reformat yapf with facebook style and update compute_stats function in utils.py and move pydeid feature2label under label.py
 import glob
 import argparse
 import logging
@@ -16,10 +19,15 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from sklearn.metrics import classification_report
+<<<<<<< HEAD
 
 from bert_deid import processors
 from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
 from bert_deid import utils
+=======
+import json
+from bert_deid.label import PYDEID_FEATURE2LABEL
+>>>>>>> 742a723... reformat yapf with facebook style and update compute_stats function in utils.py and move pydeid feature2label under label.py
 """
 Runs BERT deid on a set of text files.
 Evaluates the output (matched correct PHI categories) using gold standard annotations.
@@ -216,7 +224,7 @@ def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
                 "stop": stop,
                 "entity": entity,
                 "entity_type": entity_type,
-                "cooment": ""
+                "comment": ""
             },
             ignore_index=True
         )
@@ -226,13 +234,6 @@ def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
 
 def main():
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--model_dir",
-        required=True,
-        type=str,
-        help="Path to the model (used to define label set).",
-    )
 
     parser.add_argument(
         "--pred_path",
@@ -249,7 +250,10 @@ def main():
     )
 
     parser.add_argument(
-        "--ref_path", required=True, type=str, help="Gold standard labels"
+        "--text_path",
+        required=True,
+        type=str,
+        help="Path for de-identified text"
     )
 
     parser.add_argument(
@@ -267,9 +271,15 @@ def main():
     )
 
     parser.add_argument(
-        "--binary",
+        "--binary_eval",
         action="store_true",
-        help="Do binary evaluation (PHI or not)"
+        help="Do binary evaluation, phi instances or not"
+    )
+
+    parser.add_argument(
+        "--multi_eval",
+        action="store_true",
+        help="Multi NER evaluation, correct phi instances or not"
     )
 
     parser.add_argument(
@@ -278,6 +288,17 @@ def main():
         help="Enable more freedom in evalution, as if any individual \
         character is flagged as a phi instance, whole token would be flagged \
             as phi instance"
+    )
+
+    parser.add_argument(
+        "--data_type",
+        default=None,
+        type=str,
+        required=True,
+        choices=LABEL_SETS,
+        help="The input dataset type. Valid choices: {}.".format(
+            ', '.join(LABEL_SETS)
+        ),
     )
 
     # label transformations
@@ -390,9 +411,13 @@ def main():
 
     if args.binary:
         logger.info("***** Running binary evaluation {} *****".format(is_bio))
-    else:
+    elif args.multi_eval and not args.binary_eval:
         logger.info(
             "***** Running multi-class evaluation {} *****".format(is_bio)
+        )
+    else:
+        raise ValueError(
+            "Invalid input arguments, either binary or multi-class evaluation"
         )
 
     logger.info(" Num examples = %d", len(input_files))
@@ -415,11 +440,26 @@ def main():
 
         # load output of bert-deid
         fn_pred = pred_path / f'{fn}{pred_ext}'
-        pred_label_set.from_csv(fn_pred)
-
+        df = pd.read_csv(
+            fn_pred,
+            header=0,
+            delimiter=",",
+            dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
         # load ground truth
         gs_fn = ref_path / f'{fn}{gs_ext}'
-        gs_label_set.from_csv(gs_fn)
+        gs = pd.read_csv(
+            gs_fn,
+            header=0,
+            delimiter=",",
+            dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
 
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
@@ -464,22 +504,9 @@ def main():
                     text_pred[row['start']:row['stop']] = label2id_map[
                         entity_type.upper()]
                 except KeyError:
-                    label_map = {
-                        'age': 'AGE',
-                        'date': 'DATE',
-                        'email': 'CONTACT',
-                        'idnum': 'ID',
-                        'initials': 'NAME',
-                        'location': 'LOCATION',
-                        'mrn': 'ID',
-                        'name': 'NAME',
-                        'pager': 'ID',
-                        'ssn': 'ID',
-                        'telephone': 'CONTACT',
-                        'unit': 'ID',
-                        'url': 'CONTACT'
-                    }
-                    transformed_label = label_map[entity_type.lower()]
+                    # transform pydeid feature to correponding label
+                    transformed_label = PYDEID_FEATURE2LABEL[entity_type.lower()
+                                                            ]
                     text_pred[row['start']:row['stop']] = label2id_map[
                         transformed_label]
 
@@ -610,30 +637,32 @@ def main():
 
     final_stats = {}
     # summary stats
-    se, ppv, f1 = utils.compute_stats(df, True, False)
-    print(f'Token Macro Se: {se.mean():0.4f}')
-    print(f'Token Macro P+: {ppv.mean():0.4f}')
-    print(f'Token Macro F1: {f1.mean():0.4f}')
-    final_stats['token_macro'] = [
-        round(se.mean(), 4),
-        round(ppv.mean(), 4),
-        round(f1.mean(), 4)
-    ]
+    if args.binary_eval:
+        se, ppv, f1 = utils.compute_stats(df, token_eval=True, average='macro')
+        print(f'Token Macro Se: {se.mean():0.4f}')
+        print(f'Token Macro P+: {ppv.mean():0.4f}')
+        print(f'Token Macro F1: {f1.mean():0.4f}')
+        final_stats['token_macro'] = [
+            round(se.mean(), 4),
+            round(ppv.mean(), 4),
+            round(f1.mean(), 4)
+        ]
 
-    se, ppv, f1 = utils.compute_stats(df, True, True)
-    print(f'Token Micro Se: {se.mean():0.4f}')
-    print(f'Token Micro P+: {ppv.mean():0.4f}')
-    print(f'Token Micro F1: {f1.mean():0.4f}')
-    final_stats['token_micro'] = [
-        round(se.mean(), 4),
-        round(ppv.mean(), 4),
-        round(f1.mean(), 4)
-    ]
+        se, ppv, f1 = utils.compute_stats(df, token_eval=True, average='micro')
+        print(f'Token Micro Se: {se.mean():0.4f}')
+        print(f'Token Micro P+: {ppv.mean():0.4f}')
+        print(f'Token Micro F1: {f1.mean():0.4f}')
+        final_stats['token_micro'] = [
+            round(se.mean(), 4),
+            round(ppv.mean(), 4),
+            round(f1.mean(), 4)
+        ]
 
     if args.multi_eval:
-        token_stats = utils.compute_token_type_stats(df, True, True, label_list)
-        for label in token_stats.keys():
-            se, ppv, f1 = token_stats[label]
+        for label in label_list:
+            se, ppv, f1 = utils.compute_stats(
+                df, token_eval=True, average='micro', label=label
+            )
             print(f'Label {label}')
             print(f'Token Micro Se: {se.mean():0.4f}')
             print(f'Token Micro P+: {ppv.mean():0.4f}')
@@ -649,13 +678,15 @@ def main():
             final_stats, orient='index', columns=['Se', 'P+', 'F1']
         )
         final_stats.to_csv(stats_path)
+
     if args.bio:
-        se, ppv, f1 = utils.compute_stats(df, False, False)
+        # also perform entity evaluation
+        se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='macro')
         print(f'Entity Macro Se: {se.mean():0.4f}')
         print(f'Entity Macro P+: {ppv.mean():0.4f}')
         print(f'Entity Macro F1: {f1.mean():0.4f}')
 
-        se, ppv, f1 = utils.compute_stats(df, False, True)
+        se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='micro')
         print(f'Entity Micro Se: {se.mean():0.4f}')
         print(f'Entity Micro P+: {ppv.mean():0.4f}')
         print(f'Entity Micro F1: {f1.mean():0.4f}')

@@ -47,7 +47,7 @@ from transformers import (
 )
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import processors, new_tokenization
+from bert_deid import processors, new_tokenization as tokenization
 from bert_deid.BERT_CRF import BertCRF
 from bert_deid.extra_feature import ModelExtraFeature
 from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
@@ -55,7 +55,18 @@ from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 # PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
+# use pydeid for adding extra feature
+import pydeid
 import pkgutil
+
+from pydeid.annotators import _patterns
+# load all modules on path
+pkg = 'pydeid.annotators._patterns'
+PATTERN_NAMES = [
+    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
+]
+PATTERN_NAMES.remove('_pattern')
+_PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -818,7 +829,7 @@ def load_and_cache_examples(
 
         # get examples (mode can be 'train', 'test', or 'val')
         examples = processor.get_examples(mode, patterns)
-        features = new_tokenization.convert_examples_to_features(
+        features = tokenization.convert_examples_to_features(
             examples,
             processor.label_set.label_to_id,
             args.max_seq_length,
@@ -863,20 +874,23 @@ def load_and_cache_examples(
         [f.label_ids for f in features], dtype=torch.long
     )
 
-    if hasattr(features[0], 'additional_features'):
-        all_additional_features = torch.tensor(
-            [f.additional_features for f in features], dtype=torch.long
-        )
+    dataset = TensorDataset(
+        all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+        all_extra_features
+    )
 
-        dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
-            all_additional_features
-        )
-    else:
-        dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids
-        )
-
+    # find subwords proportion:
+    total = 0
+    non_pad_tokens = 0
+    for f in features:
+        num_subwords = np.count_nonzero(np.array(f.input_subwords))
+        total += num_subwords
+        non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
+    non_pad_tokens -= 2 * len(features)
+    print('len of feature', len(features))
+    logger.info(
+        f'Number of subwords: {total} out of number of tokens {non_pad_tokens}'
+    )
     return dataset
 
 
@@ -945,6 +959,10 @@ def main():
         args.data_type, args.bio, transform=args.label_transform
     )
     args.num_labels = len(label_set.label_list)
+    processor = processors.DeidProcessor(args.data_dir, label_set)
+
+    labels = processor.label_set.label_list
+    label_map = processor.label_set.label_to_id
 
     # if requested, we can add binary features tagged by pydeid
     # this has a dependency on pydeid
@@ -982,6 +1000,7 @@ def main():
         num_labels=args.num_labels,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
+    print('here', args.tokenizer_name)
 
     tokenizer_name = args.tokenizer_name if args.tokenizer_name else args.model_name_or_path
     print('tokenizer name', tokenizer_name)
@@ -1023,7 +1042,8 @@ def main():
             tokenizer=tokenizer,
             processor=processor,
             pad_token_label_id=pad_token_label_id,
-            mode="train"
+            mode="train",
+            patterns=args.patterns
         )
         global_step, tr_loss = train(
             args, train_dataset, model, tokenizer, processor, pad_token_label_id
@@ -1084,7 +1104,12 @@ def main():
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             eval_dataset = load_and_cache_examples(
-                args, tokenizer, processor, pad_token_label_id, mode='val'
+                args,
+                tokenizer,
+                processor,
+                pad_token_label_id,
+                mode='val',
+                patterns=args.patterns
             )
             result, _ = evaluate(
                 args=args,

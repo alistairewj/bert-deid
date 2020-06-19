@@ -23,7 +23,8 @@ import os
 import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
-
+# from bert_deid.pattern import create_extra_feature_vectors
+from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -112,11 +113,6 @@ def tokenize_with_labels(
         # more recent tokenizers add a special chars where a whitespace prefixed a word
         # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
         special_characters = b'\xe2\x96\x81'.decode('utf-8')
-    elif tokenizer_type in (
-        'RobertaTokenizer'
-    ):
-        # add Ġ where a whitespace prefixed a word 
-        special_characters = b'\xc4\xa0'.decode('utf-8')
     else:
         raise ValueError(f'Unrecognized tokenizer {tokenizer_type}')
 
@@ -334,6 +330,16 @@ def convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
 
+        patterns = example.patterns
+        pattern_label = 1
+        ex_phi_locs = []
+        for pattern in patterns:
+            ex_phi_locs.append(
+                find_phi_location(pattern, pattern_label, example.text)
+            )
+
+        assert (len(patterns) == len(ex_phi_locs))
+
         ex_tokens, ex_labels, ex_token_sw, ex_offsets, ex_lengths = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
         )
@@ -492,13 +498,13 @@ def convert_examples_to_features(
                 offsets += [-1] * padding_length
                 lengths += [-1] * padding_length
                 token_sw += [False] * padding_length
-                if add_features:
-                    additional_features = np.concatenate(
-                        [
-                            additional_features,
-                            np.zeros([padding_length, n_features])
-                        ]
-                    )
+
+            extra_features = []
+            for i in range(len(ex_phi_locs)):
+                extra_feature = create_extra_feature_vector(
+                    ex_phi_locs[i], offsets, lengths, token_sw
+                )
+                extra_features.append(extra_feature)
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
@@ -531,9 +537,10 @@ def convert_examples_to_features(
                 logger.info(
                     "label_ids: %s", " ".join([str(x) for x in label_ids])
                 )
-                if add_features:
+                for each_feature in extra_features:
                     logger.info(
-                        f'{additional_features.shape[1]} extra features added'
+                        'extra feature: %s',
+                        ' '.join([str(x) for x in each_feature])
                     )
                 logger.info("offsets: %s", " ".join([str(x) for x in offsets]))
 

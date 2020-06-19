@@ -146,7 +146,10 @@ class CoNLLProcessor(DataProcessor):
                 sentence = ' '.join(sentence)
                 examples.append(
                     InputExample(
-                        guid=guid, text=sentence, labels=label_offsets
+                        guid=guid,
+                        text=sentence,
+                        labels=label_offsets,
+                        patterns=patterns
                     )
                 )
                 sentence = []
@@ -187,7 +190,8 @@ class DeidProcessor(DataProcessor):
             if not f.endswith('.txt'):
                 continue
 
-            guid = "%s-%s" % (set_type, f[:-4])
+            # guid = "%s-%s" % (set_type, f[:-4])
+            guid = f[:-4]
             with open(os.path.join(txt_path, f), 'r') as fp:
                 text = ''.join(fp.readlines())
 
@@ -210,7 +214,7 @@ class DeidProcessor(DataProcessor):
                     guid=guid,
                     text=text,
                     labels=self.label_set.labels,
-                    tags=tags
+                    patterns=patterns
                 )
             )
 

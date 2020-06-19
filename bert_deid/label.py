@@ -148,6 +148,22 @@ LABEL_MEMBERSHIP = {
         ]
 }
 
+PYDEID_FEATURE2LABEL = {
+    'age': 'AGE',
+    'date': 'DATE',
+    'email': 'CONTACT',
+    'idnum': 'ID',
+    'initials': 'NAME',
+    'location': 'LOCATION',
+    'mrn': 'ID',
+    'name': 'NAME',
+    'pager': 'ID',
+    'ssn': 'ID',
+    'telephone': 'CONTACT',
+    'unit': 'ID',
+    'url': 'CONTACT'
+}
+
 
 # convert the lists within each dictionary to a dict
 def create_label_map(LABEL_MEMBERSHIP):

@@ -742,12 +742,24 @@ def split_by_space(text):
         offset += len(token)
 
 
-def compute_stats(df, is_token, is_micro):
-    """
+def compute_stats(df, token_eval=True, average='micro', label=None):
+    '''
     Compute se (recall), ppv (precision), f1 score
-    """
-    type_eval = 'n_'
-    if is_token:
+    Args:
+        df: DataFrame, contains stats for each file in dataset
+        token_eval: Bool, token or entity evaultion
+        average: string, ['micro', 'macro']
+        label: string, None (if binary evalution), valid label (if multi evaluation)
+    '''
+    average = average.lower()
+    if average not in ('micro', 'macro'):
+        raise ValueError('Invalid average argument.')
+    if label is not None:
+        type_eval = f'n_{label}_'
+    else:
+        type_eval = 'n_'
+
+    if token_eval:
         type_eval += 'token_'
     else:
         type_eval += 'entity_'
@@ -755,35 +767,12 @@ def compute_stats(df, is_token, is_micro):
     tp = df[type_eval + 'tp']
     fp = df[type_eval + 'fp']
     fn = df[type_eval + 'fn']
-    if is_micro:
+    if average == 'micro':
         tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
     se = tp / (tp + fn)
     ppv = tp / (tp + fp)
     f1 = 2 * se * ppv / (se + ppv)
     return se, ppv, f1
-
-def compute_token_type_stats(df, is_token, is_micro, labels):
-    """
-    Compute se (recall), ppv (precision), f1 score
-    """
-    stats = {}
-    for label in labels:
-        type_eval = 'n_{}_'.format(label)
-        if is_token:
-            type_eval += 'token_'
-        else:
-            type_eval += 'entity_'
-
-        tp = df[type_eval + 'tp']
-        fp = df[type_eval + 'fp']
-        fn = df[type_eval + 'fn']
-        if is_micro:
-            tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
-        se = tp / (tp + fn)
-        ppv = tp / (tp + fp)
-        f1 = 2 * se * ppv / (se + ppv)
-        stats[label] = (se, ppv, f1)
-    return stats
 
 
 def get_entities(data):

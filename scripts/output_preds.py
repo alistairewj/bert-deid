@@ -13,7 +13,18 @@ from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 from tqdm import tqdm
 import torch
 
+# use pydeid for adding extra feature
+import pydeid
 import pkgutil
+
+from pydeid.annotators import _patterns
+# load all modules on path
+pkg = 'pydeid.annotators._patterns'
+PATTERN_NAMES = [
+    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
+]
+PATTERN_NAMES.remove('_pattern')
+_PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
@@ -90,6 +101,9 @@ if __name__ == '__main__':
             f = f.lower()
             args.patterns.append(f)
 
+    if 'all' in args.patterns:
+        args.patterns = PATTERN_NAMES
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # load in a trained model
     transformer = Transformer(
@@ -123,12 +137,18 @@ if __name__ == '__main__':
     lengths = []
     offsets = []
     labels = []
-
+    num_subwords = 0
+    num_tokens = 0
     for f in tqdm(files, total=len(files), desc='Files'):
         with open(data_path / 'txt' / f, 'r') as fp:
             text = ''.join(fp.readlines())
 
-        ex_preds, ex_lengths, ex_offsets = transformer.predict(text)
+        ex_preds, ex_lengths, ex_offsets, num_subwords, num_tokens = transformer.predict(
+            text,
+            document_id=f[:-4],
+            num_subwords=num_subwords,
+            num_tokens=num_tokens
+        )
 
         if preds is None:
             preds = ex_preds
@@ -185,5 +205,8 @@ if __name__ == '__main__':
         labels.extend(label_tokens)
         """
 
+    print(
+        f'Number of subwords: {num_subwords} out of number of tokens {num_tokens}'
+    )
     # with open(args.output, 'wb') as fp:
     #     pickle.dump([files, preds, labels, lengths, offsets], fp)
