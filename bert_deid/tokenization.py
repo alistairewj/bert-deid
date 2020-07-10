@@ -26,7 +26,6 @@ from bisect import bisect_left, bisect_right
 # from bert_deid.pattern import create_extra_feature_vectors
 from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
 
-
 import numpy as np
 
 logging.basicConfig(
@@ -306,7 +305,9 @@ def convert_examples_to_features(
         pattern_label = 1
         ex_phi_locs = []
         for pattern in patterns:
-            ex_phi_locs.append(find_phi_location(pattern, pattern_label, example.text))
+            ex_phi_locs.append(
+                find_phi_location(pattern, pattern_label, example.text)
+            )
 
         assert (len(patterns) == len(ex_phi_locs))
 
@@ -420,9 +421,10 @@ def convert_examples_to_features(
 
             extra_features = []
             for i in range(len(ex_phi_locs)):
-                extra_feature = create_extra_feature_vector(ex_phi_locs[i], offsets, lengths, token_sw)
+                extra_feature = create_extra_feature_vector(
+                    ex_phi_locs[i], offsets, lengths, token_sw
+                )
                 extra_features.append(extra_feature)
-
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
@@ -455,7 +457,10 @@ def convert_examples_to_features(
                     "label_ids: %s", " ".join([str(x) for x in label_ids])
                 )
                 for each_feature in extra_features:
-                    logger.info('extra feature: %s', ' '.join([str(x) for x in each_feature]))
+                    logger.info(
+                        'extra feature: %s',
+                        ' '.join([str(x) for x in each_feature])
+                    )
                 logger.info("offsets: %s", " ".join([str(x) for x in offsets]))
 
             features.append(

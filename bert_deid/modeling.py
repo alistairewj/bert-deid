@@ -94,7 +94,9 @@ class AlbertForTokenClassification(AlbertPreTrainedModel):
                 active_labels = labels.view(-1)[active_loss]
                 loss = loss_fct(active_logits, active_labels)
             else:
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
+                loss = loss_fct(
+                    logits.view(-1, self.num_labels), labels.view(-1)
+                )
+            outputs = (loss, ) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)

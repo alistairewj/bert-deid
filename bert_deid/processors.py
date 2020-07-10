@@ -13,6 +13,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 class InputExample(object):
     """A single training/test example."""
     def __init__(self, guid, text, labels=None, patterns=[]):
@@ -75,8 +76,6 @@ class DataProcessor(object):
             reader = csv.reader(f, delimiter=delimiter, quotechar=quotechar)
             lines = []
             for line in reader:
-                if sys.version_info[0] == 2:
-                    line = list(unicode(cell, 'utf-8') for cell in line)
                 lines.append(line)
             return lines
 
@@ -134,7 +133,6 @@ class CoNLLProcessor(DataProcessor):
 
                     label_new = label[j]
 
-
                     label_offsets.append([label_new, s_len, len(l)])
                     # +1 to account for the whitespaces we insert below
                     s_len += len(l) + 1
@@ -143,7 +141,10 @@ class CoNLLProcessor(DataProcessor):
                 sentence = ' '.join(sentence)
                 examples.append(
                     InputExample(
-                        guid=guid, text=sentence, labels=label_offsets, patterns=patterns
+                        guid=guid,
+                        text=sentence,
+                        labels=label_offsets,
+                        patterns=patterns
                     )
                 )
                 sentence = []
@@ -196,7 +197,10 @@ class DeidProcessor(DataProcessor):
             self.label_set.from_csv(fn)
             examples.append(
                 InputExample(
-                    guid=guid, text=text, labels=self.label_set.labels, patterns=patterns
+                    guid=guid,
+                    text=text,
+                    labels=self.label_set.labels,
+                    patterns=patterns
                 )
             )
 
