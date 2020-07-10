@@ -25,7 +25,6 @@ class CRF(nn.Module):
        Learning*. Morgan Kaufmann. pp. 282–289.
     .. _Viterbi algorithm: https://en.wikipedia.org/wiki/Viterbi_algorithm
     """
-
     def __init__(self, num_tags: int, batch_first: bool = False) -> None:
         if num_tags <= 0:
             raise ValueError(f'invalid number of tags: {num_tags}')
@@ -51,11 +50,11 @@ class CRF(nn.Module):
         return f'{self.__class__.__name__}(num_tags={self.num_tags})'
 
     def forward(
-            self,
-            emissions: torch.Tensor,
-            tags: torch.LongTensor,
-            mask: Optional[torch.ByteTensor] = None,
-            reduction: str = 'sum',
+        self,
+        emissions: torch.Tensor,
+        tags: torch.LongTensor,
+        mask: Optional[torch.ByteTensor] = None,
+        reduction: str = 'sum',
     ) -> torch.Tensor:
         """Compute the conditional log likelihood of a sequence of tags given emission scores.
         Args:
@@ -102,8 +101,9 @@ class CRF(nn.Module):
         assert reduction == 'token_mean'
         return llh.sum() / mask.float().sum()
 
-    def decode(self, emissions: torch.Tensor,
-               mask: Optional[torch.ByteTensor] = None) -> List[List[int]]:
+    def decode(
+        self, emissions: torch.Tensor, mask: Optional[torch.ByteTensor] = None
+    ) -> List[List[int]]:
         """Find the most likely tag sequence using Viterbi algorithm.
         Args:
             emissions (`~torch.Tensor`): Emission score tensor of size
@@ -125,29 +125,35 @@ class CRF(nn.Module):
         return self._viterbi_decode(emissions, mask)
 
     def _validate(
-            self,
-            emissions: torch.Tensor,
-            tags: Optional[torch.LongTensor] = None,
-            mask: Optional[torch.ByteTensor] = None) -> None:
+        self,
+        emissions: torch.Tensor,
+        tags: Optional[torch.LongTensor] = None,
+        mask: Optional[torch.ByteTensor] = None
+    ) -> None:
         if emissions.dim() != 3:
-            raise ValueError(f'emissions must have dimension of 3, got {emissions.dim()}')
+            raise ValueError(
+                f'emissions must have dimension of 3, got {emissions.dim()}'
+            )
         if emissions.size(2) != self.num_tags:
             raise ValueError(
                 f'expected last dimension of emissions is {self.num_tags}, '
-                f'got {emissions.size(2)}')
+                f'got {emissions.size(2)}'
+            )
 
         if tags is not None:
             if emissions.shape[:2] != tags.shape:
                 raise ValueError(
                     'the first two dimensions of emissions and tags must match, '
-                    f'got {tuple(emissions.shape[:2])} and {tuple(tags.shape)}')
+                    f'got {tuple(emissions.shape[:2])} and {tuple(tags.shape)}'
+                )
 
         if mask is not None:
             if emissions.shape[:2] != mask.shape:
                 raise ValueError(
                     'the first two dimensions of emissions and mask must match, '
-                    f'got {tuple(emissions.shape[:2])} and {tuple(mask.shape)}')
-        # below conditions are not true in our case as we can start with a subword 
+                    f'got {tuple(emissions.shape[:2])} and {tuple(mask.shape)}'
+                )
+        # below conditions are not true in our case as we can start with a subword
         # which is masked in calculating loss
         #     no_empty_seq = not self.batch_first and mask[0].all()
         #     no_empty_seq_bf = self.batch_first and mask[:, 0].all()
@@ -155,8 +161,9 @@ class CRF(nn.Module):
         #         raise ValueError('mask of the first timestep must all be on')
 
     def _compute_score(
-            self, emissions: torch.Tensor, tags: torch.LongTensor,
-            mask: torch.ByteTensor) -> torch.Tensor:
+        self, emissions: torch.Tensor, tags: torch.LongTensor,
+        mask: torch.ByteTensor
+    ) -> torch.Tensor:
         # emissions: (seq_length, batch_size, num_tags)
         # tags: (seq_length, batch_size)
         # mask: (seq_length, batch_size)
@@ -193,7 +200,8 @@ class CRF(nn.Module):
         return score
 
     def _compute_normalizer(
-            self, emissions: torch.Tensor, mask: torch.ByteTensor) -> torch.Tensor:
+        self, emissions: torch.Tensor, mask: torch.ByteTensor
+    ) -> torch.Tensor:
         # emissions: (seq_length, batch_size, num_tags)
         # mask: (seq_length, batch_size)
         assert emissions.dim() == 3 and mask.dim() == 2
@@ -206,7 +214,8 @@ class CRF(nn.Module):
         # (batch_size, num_tags) where for each batch, the j-th column stores
         # the score that the first timestep has tag j
         # shape: (batch_size, num_tags)
-        score = (self.start_transitions + emissions[0])*mask[0].unsqueeze(1).float()
+        score = (self.start_transitions +
+                 emissions[0]) * mask[0].unsqueeze(1).float()
 
         for i in range(1, seq_length):
             # Broadcast score for every possible next tag
@@ -242,8 +251,9 @@ class CRF(nn.Module):
         # shape: (batch_size,)
         return torch.logsumexp(score, dim=1)
 
-    def _viterbi_decode(self, emissions: torch.FloatTensor,
-                        mask: torch.ByteTensor) -> List[List[int]]:
+    def _viterbi_decode(
+        self, emissions: torch.FloatTensor, mask: torch.ByteTensor
+    ) -> List[List[int]]:
         # emissions: (seq_length, batch_size, num_tags)
         # mask: (seq_length, batch_size)
         assert emissions.dim() == 3 and mask.dim() == 2
@@ -254,7 +264,8 @@ class CRF(nn.Module):
 
         # Start transition and first emission
         # shape: (batch_size, num_tags)
-        score = (self.start_transitions + emissions[0])*mask[0].unsqueeze(1).float()
+        score = (self.start_transitions +
+                 emissions[0]) * mask[0].unsqueeze(1).float()
         history = []
 
         # score is a tensor of size (batch_size, num_tags) where for every batch,
@@ -318,11 +329,3 @@ class CRF(nn.Module):
             best_tags_list.append(best_tags)
 
         return best_tags_list
-
-
-
-
-
-
-    
-

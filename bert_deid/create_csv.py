@@ -15,68 +15,104 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-from bert_deid.tokenization import BertTokenizerNER
-from bert_deid.utils import create_hamonize_label_dict
-
 
 def argparser(args):
     parser = argparse.ArgumentParser(description='Convert i2b2 annotations')
 
-    parser.add_argument("--input_path",
-                        default=None,
-                        type=str,
-                        help=("Input path with a txt"
-                              " and ann subfolder."))
+    parser.add_argument(
+        "--input_path",
+        default=None,
+        type=str,
+        help=("Input path with a txt"
+              " and ann subfolder.")
+    )
 
-    parser.add_argument("--text_extension",
-                        default='txt',
-                        type=str,
-                        help=("Extension for input files in input folder "
-                              "(default: txt)"))
-    parser.add_argument("--ref_extension",
-                        default='gs',
-                        type=str,
-                        help=("Extension for gold standard files in"
-                              " ref folder (default: gs)"))
+    parser.add_argument(
+        "--text_extension",
+        default='txt',
+        type=str,
+        help=("Extension for input files in input folder "
+              "(default: txt)")
+    )
+    parser.add_argument(
+        "--ref_extension",
+        default='gs',
+        type=str,
+        help=(
+            "Extension for gold standard files in"
+            " ref folder (default: gs)"
+        )
+    )
 
-    parser.add_argument('-d', '--data_path', type=str,
-                        default=None, required=True,
-                        help=('Folder to output CSV of all data to.'
-                              ' (default: do not create a CSV.)'))
+    parser.add_argument(
+        '-d',
+        '--data_path',
+        type=str,
+        default=None,
+        required=True,
+        help=(
+            'Folder to output CSV of all data to.'
+            ' (default: do not create a CSV.)'
+        )
+    )
 
     # optional arguments
-    parser.add_argument("--subset",
-                        default=100,
-                        type=int,
-                        help="Percent of data to subset training to.")
-    parser.add_argument("--task_name",
-                        default='i2b2',
-                        type=str,
-                        choices=['i2b2', 'hipaa', 'binary'],
-                        help="Defines the label set.")
-    parser.add_argument('-g', '--group_tags', action='store_true',
-                        help='group tags into categories.')
-    parser.add_argument('-m', '--method', type=str,
-                        default='sentence',
-                        choices=['sentence', 'overlap'],
-                        help='method for splitting text into individual examples.')
-    parser.add_argument('--step_size', type=int,
-                        default=20,
-                        help='if method is overlap, the token step size to use.')
-    parser.add_argument('--sequence_length', type=int,
-                        default=100,
-                        help='if method is overlap, the maximum token length.')
-    parser.add_argument("--bert_model", type=str,
-                        default="bert-base-cased",
-                        choices=[
-                            "bert-base-uncased", "bert-base-cased",
-                            "bert-large-uncased", "bert-large-cased",
-                            "bert-base-multilingual-uncased",
-                            "bert-base-multilingual-cased",
-                            "bert-base-chinese"],
-                        help="BERT pre-trained model for tokenization")
-    parser.add_argument('-q', '--quiet', action='store_true',
-                        help='suppress peasants discussing their work')
+    parser.add_argument(
+        "--subset",
+        default=100,
+        type=int,
+        help="Percent of data to subset training to."
+    )
+    parser.add_argument(
+        "--task_name",
+        default='i2b2',
+        type=str,
+        choices=['i2b2', 'hipaa', 'binary'],
+        help="Defines the label set."
+    )
+    parser.add_argument(
+        '-g',
+        '--group_tags',
+        action='store_true',
+        help='group tags into categories.'
+    )
+    parser.add_argument(
+        '-m',
+        '--method',
+        type=str,
+        default='sentence',
+        choices=['sentence', 'overlap'],
+        help='method for splitting text into individual examples.'
+    )
+    parser.add_argument(
+        '--step_size',
+        type=int,
+        default=20,
+        help='if method is overlap, the token step size to use.'
+    )
+    parser.add_argument(
+        '--sequence_length',
+        type=int,
+        default=100,
+        help='if method is overlap, the maximum token length.'
+    )
+    parser.add_argument(
+        "--bert_model",
+        type=str,
+        default="bert-base-cased",
+        choices=[
+            "bert-base-uncased", "bert-base-cased", "bert-large-uncased",
+            "bert-large-cased", "bert-base-multilingual-uncased",
+            "bert-base-multilingual-cased", "bert-base-chinese"
+        ],
+        help="BERT pre-trained model for tokenization"
+    )
+    parser.add_argument(
+        '-q',
+        '--quiet',
+        action='store_true',
+        help='suppress peasants discussing their work'
+    )
     args_out = parser.parse_args(args)
 
     if args_out.subset:
@@ -88,8 +124,10 @@ def argparser(args):
 
 
 # our dataframe will have consistent columns
-COLUMN_NAMES = ['document_id', 'annotation_id', 'start',
-                'stop', 'entity', 'entity_type', 'comment']
+COLUMN_NAMES = [
+    'document_id', 'annotation_id', 'start', 'stop', 'entity', 'entity_type',
+    'comment'
+]
 
 
 def sentence_spans(text):
@@ -111,7 +149,7 @@ def sentence_spans(text):
     offset = 0
     for token in tokens:
         offset = text.find(token, offset)
-        yield token, offset, offset+len(token)
+        yield token, offset, offset + len(token)
         offset += len(token)
 
 
@@ -130,8 +168,7 @@ def split_by_sentence(text):
     return sentences
 
 
-def split_by_overlap(text, tokenizer,
-                     token_step_size=20, sequence_length=100):
+def split_by_overlap(text, tokenizer, token_step_size=20, sequence_length=100):
     # track offsets in tokenization
     tokens, tokens_sw, tokens_idx = tokenizer.tokenize_with_index(text)
 
@@ -156,8 +193,10 @@ def split_by_overlap(text, tokenizer,
     else:
         seq_offsets = range(0, len(tokens) - sequence_length, token_step_size)
         last_offset = seq_offsets[-1] + token_step_size
-        seq_offsets = [[tokens_start[x], tokens_start[x + sequence_length]]
-                       for x in seq_offsets]
+        seq_offsets = [
+            [tokens_start[x], tokens_start[x + sequence_length]]
+            for x in seq_offsets
+        ]
 
         # last example always goes to the end of the text
         seq_offsets.append([tokens_start[last_offset], len(text)])
@@ -174,8 +213,7 @@ def split_by_overlap(text, tokenizer,
 
 
 def split_report_into_sections(text):
-    p_section = re.compile(
-        r'\n ([A-Z ()/,-]+):\s', re.DOTALL)
+    p_section = re.compile(r'\n ([A-Z ()/,-]+):\s', re.DOTALL)
 
     sections = list()
     section_names = list()
@@ -244,20 +282,22 @@ def create_ann(examples, df):
                 if row['stop'] <= stop:
                     # add indices of annotated de-id
                     # adjust them based upon example start offset
-                    deid_info.append([
-                        row['start'] - start,
-                        row['stop'] - start,
-                        row['entity_type']
-                    ])
+                    deid_info.append(
+                        [
+                            row['start'] - start, row['stop'] - start,
+                            row['entity_type']
+                        ]
+                    )
                 else:
                     # if we are here, the PHI row starts in this example..
                     # but ends in the next example. this is an edge case.
                     # annotate up to the end of this example
-                    deid_info.append([
-                        row['start'] - start,
-                        stop - start,
-                        row['entity_type']
-                    ])
+                    deid_info.append(
+                        [
+                            row['start'] - start, stop - start,
+                            row['entity_type']
+                        ]
+                    )
 
             d += 1
 
@@ -271,9 +311,7 @@ def main(args):
 
     input_path = args.input_path
     output_fn = input_path.split(os.sep)[-1]
-    output_fn = os.path.join(
-        args.data_path, f'{output_fn}.csv'
-    )
+    output_fn = os.path.join(args.data_path, f'{output_fn}.csv')
 
     verbose_flag = not args.quiet
 
@@ -302,7 +340,7 @@ def main(args):
     records.sort()
 
     if args.subset < 100:
-        n_subset = int(float(len(records))/100.0*args.subset)
+        n_subset = int(float(len(records)) / 100.0 * args.subset)
         if n_subset == 0:
             print(f'Percentage would result in {n_subset} records.')
             print('Retaining 1 record.')
@@ -329,7 +367,8 @@ def main(args):
             do_lower_case = False
 
         tokenizer = BertTokenizerNER.from_pretrained(
-            args.bert_model, do_lower_case=do_lower_case)
+            args.bert_model, do_lower_case=do_lower_case
+        )
 
     if args.group_tags:
         label_dict = create_hamonize_label_dict(grouping=args.task_name)
@@ -356,7 +395,8 @@ def main(args):
             example = split_by_sentence(text)
         else:
             example = split_by_overlap(
-                text, tokenizer,
+                text,
+                tokenizer,
                 token_step_size=args.step_size,
                 sequence_length=args.sequence_length
             )
@@ -388,8 +428,8 @@ def main(args):
                 # (if no entities, this for loop does not run)
                 for k in range(len(example_ann[i])):
                     # update the entity (element 2) using label_to_type dict
-                    example_ann[i][k][2] = label_dict[example_ann[i]
-                                                      [k][2].upper()]
+                    example_ann[i][k][2] = label_dict[example_ann[i][k]
+                                                      [2].upper()]
         # save to master list
         examples.extend(example)
         annotations.extend(example_ann)
@@ -412,13 +452,16 @@ def main(args):
         print(f'Outputting CSV dataset to {output_fn}')
 
     with open(output_fn, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',',
-                               quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        csvwriter = csv.writer(
+            csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL
+        )
         for i in range(len(annotations)):
             sentence = examples[i]
             # create row: text id, sentence, list of PHI indices
-            row = ['.'.join([str(x) for x in sentence[:4]]),
-                   sentence[4], annotations[i]]
+            row = [
+                '.'.join([str(x) for x in sentence[:4]]), sentence[4],
+                annotations[i]
+            ]
             csvwriter.writerow(row)
 
 
