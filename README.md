@@ -2,13 +2,33 @@
 
 Code to fine-tune BERT on a medical note de-identification task.
 
-Install:
+## Install
 
-```
-pip install -e .
-```
+There are three options for installation:
 
-This is an "editable" or developer install; it symlinks the directory so changes to the module are reflected instantly in the environment.
+* Create an environment called `deid` **(recommended)**: `conda env create -f environment.yml`
+* conda: `conda install bert_deid`
+* pip: `pip install bert_deid`
+
+## Usage
+
+```python
+from bert_deid import model as bert_deid_model
+
+# Load a trained model
+bert_model = bert_deid_model.BertForDEID(
+    model_dir="models/i2b2_2014"
+)
+
+# Apply that model on some text
+text = 'Discussed clinical course with Dr. Somayah yesterday.'
+text_deid = bert_model.deid(text)
+print(text_deid)
+
+# Show the annotations
+ann = bert_model.annotate(text)
+print(ann)
+```
 
 ## Training and evaluating a transformer model
 
@@ -25,7 +45,7 @@ Look at the `deid-gs` repository for examples of datasets in this format.
 
 With the dataset available, create the environment:
 
-`conda env create -f environment.yml`
+`conda create env -f environment.yml`
 
 Activate the environment:
 
