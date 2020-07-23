@@ -45,16 +45,14 @@ from transformers import (
     AutoTokenizer, AutoModel
 )
 # custom class written for albert token classification
-from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import processors, tokenization
-from bert_deid.BERT_CRF import BertCRF
-from bert_deid.extra_feature import ModelExtraFeature
+from bert_deid.model.albert import AlbertForTokenClassification
+from bert_deid.model.crf import BertCRF
+from bert_deid.model.extra_feature import ModelExtraFeature
 
 # PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
-# use pydeid for adding extra feature
-import pydeid
 import pkgutil
 
 try:
