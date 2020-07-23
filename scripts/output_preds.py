@@ -15,17 +15,6 @@ import torch
 
 import pkgutil
 
-# use pydeid for adding extra feature
-import pydeid
-from pydeid.annotators import _patterns
-# load all modules on path
-pkg = 'pydeid.annotators._patterns'
-PATTERN_NAMES = [
-    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
-]
-PATTERN_NAMES.remove('_pattern')
-_PATTERN_NAMES = PATTERN_NAMES + ['all']
-
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
 
@@ -65,7 +54,6 @@ if __name__ == '__main__':
         type=str,
         nargs='+',
         default=None,
-        choices=_PATTERN_NAMES,
         help="Perform rule-based approach with pydeid patterns: "
         f"{', '.join(_PATTERN_NAMES)}"
     )
@@ -90,12 +78,7 @@ if __name__ == '__main__':
     if args.feature is not None:
         for f in args.feature:
             f = f.lower()
-            if f not in _PATTERN_NAMES:
-                raise ValueError("Invalid feature name")
             args.patterns.append(f)
-
-    if 'all' in args.patterns:
-        args.patterns = PATTERN_NAMES
 
     # load in a trained model
     transformer = Transformer(
