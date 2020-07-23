@@ -18,6 +18,10 @@ setuptools.setup(
     install_requires=[],
     entry_points={
         'console_scripts': ['bert_deid = bert_deid.__main__:main'],
-        'bert_deid.__main__': ['apply = bert_deid.__main__:apply']
+        'bert_deid.__main__':
+            [
+                'apply = bert_deid.__main__:apply',
+                'download = bert_deid.__main__:download'
+            ]
     },
 )
