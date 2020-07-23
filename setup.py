@@ -15,5 +15,8 @@ setuptools.setup(
     author_email='aewj@mit.edu',
     license='Apache 2.0',
     packages=setuptools.find_packages(),
-    install_requires=[]
+    install_requires=[],
+    entry_points={
+        'console_scripts': ['bert_deid = bert_deid.__main__:main'],
+    },
 )
