@@ -8,7 +8,7 @@ def readme():
 
 setuptools.setup(
     name='bert_deid',
-    version='0.1',
+    version='0.2.0',
     description='Remove identifiers from data using BERT',
     url='https://github.com/alistairewj/bert-deid',
     author='Alistair Johnson',
