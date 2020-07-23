@@ -1,8 +1,10 @@
-import torch
-from torch import nn
+from typing import List, Optional
 import os
 import logging
+
 import numpy as np
+import torch
+from torch import nn
 
 logger = logging.getLogger(__name__)
 WEIGHTS_NAME = "pytorch_model.bin"
