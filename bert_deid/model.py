@@ -215,11 +215,7 @@ class Transformer(object):
         # in this case we have a length 1 example
         # we use the SHA-256 hash of the text as the globally unique identifier
         guid = sha256(text.encode()).hexdigest()
-        examples = [
-            processors.InputExample(
-                guid=guid, text=text, labels=None, patterns=self.patterns
-            )
-        ]
+        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
         features = tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
@@ -253,24 +249,29 @@ class Transformer(object):
         all_label_ids = torch.tensor(
             [f.label_ids for f in features], dtype=torch.long
         )
-        all_extra_features = torch.tensor(
-            [f.extra_feature for f in features], dtype=torch.long
-        )
 
-        eval_dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
-            all_extra_features
-        )
-        eval_sampler = SequentialSampler(eval_dataset)
-        eval_dataloader = DataLoader(
-            eval_dataset, sampler=eval_sampler, batch_size=batch_size
-        )
+        if hasattr(features[0], 'additional_features'):
+            all_additional_features = torch.tensor(
+                [f.additional_features for f in features], dtype=torch.long
+            )
+
+            dataset = TensorDataset(
+                all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+                all_additional_features
+            )
+        else:
+            dataset = TensorDataset(
+                all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+            )
+
+        sampler = SequentialSampler(dataset)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=batch_size)
 
         logits = None
         out_label_ids = None
         mask = None
 
-        for batch in eval_dataloader:
+        for batch in dataloader:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
@@ -288,8 +289,6 @@ class Transformer(object):
                     inputs['extra_features'] = batch[4]
                 outputs = self.model(**inputs)
                 _, batch_logits = outputs[:2]
-
-                # eval_loss += tmp_eval_loss.item()
 
             # extract output predictions (logits) as a numpy array
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
@@ -362,3 +361,34 @@ class Transformer(object):
         preds = preds[unique_idx, :]
 
         return preds, lengths, offsets
+
+    def apply(self, text, repl='___'):
+        preds, lengths, offsets = self.predict(text)
+
+        # get the free-text label
+        labels = [
+            self.label_set.id_to_label[idxMax]
+            for idxMax in preds.argmax(axis=1)
+        ]
+
+        # merge entities which are adjacent
+        #removed_entities = np.zeros(len(labels), dtype=bool)
+        for i in reversed(range(len(labels))):
+            if i == 0 or labels[i] == 'O':
+                continue
+
+            if labels[i] == labels[i - 1]:
+                offset, length = offsets.pop(i), lengths.pop(i)
+                lengths[i - 1] = offset + length - offsets[i - 1]
+                labels.pop(i)
+
+        #keep_entities = ~removed_entities
+        #labels = [l for i, l in enumerate(labels) if keep_entities[i]]
+        #lengths = lengths[keep_entities]
+        #offsets = offsets[keep_entities]
+        for i in reversed(range(len(labels))):
+            if labels[i] != 'O':
+                # replace this instance of text with three underscores
+                text = text[:offsets[i]] + repl + text[offsets[i] + lengths[i]:]
+
+        return text

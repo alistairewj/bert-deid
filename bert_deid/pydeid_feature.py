@@ -2,8 +2,10 @@ import pydeid
 import pkgutil
 from pydeid.annotation import Document, EntityType
 from pydeid.annotators import Pattern
-
 from pydeid.annotators import _patterns
+
+from bert_deid.processors import Tag
+
 # load all modules on path
 pkg = 'pydeid.annotators._patterns'
 _PATTERN_NAMES = [
@@ -12,27 +14,42 @@ _PATTERN_NAMES = [
 _PATTERN_NAMES.remove('_pattern')
 
 
-def find_phi_location(pattern_name, pattern_label, text):
-    if pattern_name is None:
-        return None
-    if pattern_name.lower() not in _PATTERN_NAMES:
-        raise ValueError("Invalid pattern argument")
+def apply_pydeid_to_text(text, patterns=_PATTERN_NAMES):
+    additional_features = []
+    for pattern_name in _PATTERN_NAMES:
+        if pattern_name == 'all':
+            continue
+        if pattern_name is None:
+            return None
+        if pattern_name.lower() not in _PATTERN_NAMES:
+            raise ValueError("Invalid pattern argument")
 
-    doc = Document(text)
+        doc = Document(text)
 
-    # find PHI with specific pydeid pattern
-    entity_types = [EntityType(pattern_name)]
-    modules = [pattern_name]
-    model = Pattern(modules, entity_types)
-    txt_annotated = model.annotate(doc)
+        # find PHI with specific pydeid pattern
+        entity_types = [EntityType(pattern_name)]
+        modules = [pattern_name]
+        model = Pattern(modules, entity_types)
+        txt_annotated = model.annotate(doc)
 
-    # mark location of detected phi with 1s and rest with 0s
-    phi_loc = [0] * len(text)
-    for ann in txt_annotated.annotations:
-        start, end = ann.start, ann.end
-        phi_loc[start:end] = [pattern_label] * (end - start)
+        # retain the detected instances
+        for ann in txt_annotated.annotations:
+            start, end = ann.start, ann.end
+            # Tag is a named tuple with three attributes: name, start, offset
+            additional_features.append(Tag(pattern_name, start, end - start))
 
-    return phi_loc
+    if 'all' in pattern_name:
+        # find PHI with all pydeid pattern
+        entity_types = [EntityType(name) for name in _PATTERN_NAMES]
+        model = Pattern(_PATTERN_NAMES, entity_types)
+        txt_annotated = model.annotate(doc)
+
+        # TODO: merge intervals
+        for ann in txt_annotated.annotations:
+            start, end = ann.start, ann.end
+            additional_features.append(Tag('all', start, end - start))
+
+    return additional_features
 
 
 def create_extra_feature_vector(
