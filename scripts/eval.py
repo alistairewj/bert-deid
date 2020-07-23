@@ -1,22 +1,25 @@
-from bert_deid import utils
-import pandas as pd
-import numpy as np
+from collections import OrderedDict
+import json
+
+import os
 import re
 import string
 import csv
+from copy import deepcopy
 import glob
 import argparse
 import logging
 from pathlib import Path
-import os
-import re
+
+import pandas as pd
+import numpy as np
 from tqdm import tqdm
-from collections import OrderedDict
+import torch
+from sklearn.metrics import classification_report
 
 from bert_deid import processors
-from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection, LABEL_MAP
-from sklearn.metrics import classification_report
-import json
+from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
+from bert_deid import utils
 """
 Runs BERT deid on a set of text files.
 Evaluates the output (matched correct PHI categories) using gold standard annotations.
@@ -204,6 +207,13 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--model_dir",
+        required=True,
+        type=str,
+        help="Path to the model (used to define label set).",
+    )
+
+    parser.add_argument(
         "--pred_path",
         required=True,
         type=str,
@@ -249,32 +259,11 @@ def main():
             as phi instance"
     )
 
-    parser.add_argument(
-        "--data_type",
-        default=None,
-        type=str,
-        required=True,
-        choices=LABEL_SETS,
-        help="The input dataset type. Valid choices: {}.".format(
-            ', '.join(LABEL_SETS)
-        ),
-    )
-
     # label transformations
     parser.add_argument(
         "--bio",
         action='store_true',
         help="Whether to transform labels to use inside-outside-beginning tags"
-    )
-    _LABEL_TRANSFORMS = list(LABEL_MEMBERSHIP.keys())
-    parser.add_argument(
-        "--label_transform",
-        default=None,
-        choices=_LABEL_TRANSFORMS,
-        help=(
-            "Map labels using pre-coded transforms: "
-            f"{', '.join(_LABEL_TRANSFORMS)}"
-        )
     )
 
     parser.add_argument(
@@ -323,9 +312,7 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    label_set = LabelCollection(
-        data_type=args.data_type, bio=None, transform=args.label_transform
-    )
+    label_set = torch.load(os.path.join(args.model_dir, 'label_set.bin'))
 
     # get the label to ID map from the label set
     if args.binary:
@@ -364,6 +351,11 @@ def main():
 
     logger.info(" Num examples = %d", len(input_files))
 
+    # we will load predictions/ground truth into LabelSet objects
+    # the object handles label transformation, etc.
+    pred_label_set = deepcopy(label_set)
+    gs_label_set = deepcopy(label_set)
+
     fn_all, fp_all = [], []
     perf_all = {}
     total_eval = 0
@@ -377,65 +369,31 @@ def main():
 
         # load output of bert-deid
         fn_pred = pred_path / f'{fn}{pred_ext}'
-        df = pd.read_csv(
-            fn_pred,
-            header=0,
-            delimiter=",",
-            dtype={
-                'entity': str,
-                'entity_type': str
-            }
-        )
+        pred_label_set.from_csv(fn_pred)
+
         # load ground truth
         gs_fn = ref_path / f'{fn}{gs_ext}'
-        gs = pd.read_csv(
-            gs_fn,
-            header=0,
-            delimiter=",",
-            dtype={
-                'entity': str,
-                'entity_type': str
-            }
-        )
+        gs_label_set.from_csv(gs_fn)
 
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
-        for i, row in gs.iterrows():
+        for i, label in enumerate(gs_label_set.labels):
+            start, stop = label.start, label.start + label.length
+            entity_type = label.entity_type
+
             if args.binary:
-                text_tar[row['start']:row['stop']] = 1
+                text_tar[start:stop] = 1
             else:
-                if args.label_transform is not None:
-                    transformed_label = LABEL_MAP[args.label_transform][
-                        row['entity_type'].upper()]
-                    text_tar[row['start']:row['stop']
-                            ] = label2id_map[transformed_label]
-                else:
-                    text_tar[row['start']:row['stop']] = label2id_map[
-                        row['entity_type'].upper()]
+                text_tar[start:stop] = gs_label_set.label_to_id[entity_type]
+
         text_pred = np.zeros(len(text), dtype=int)
-        for i, row in df.iterrows():
-            if args.bio:
-                if (
-                    'B-' not in row['entity_type'] and
-                    'I-' not in row['entity_type']
-                ):
-                    print(f'type: {row["entity_type"]}')
-                    raise ValueError(
-                        "Invalid label transform arguments. Data prediction doesn't use BIO scheme."
-                    )
-                # assert ('b' in row['entity_type'].lower() or 'i' in row['entity_type'])
-                entity_type = row['entity_type'][
-                    2:]  # remove b- or i-, don't care for char eval
-            else:
-                if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
-                    raise ValueError(
-                        "Required --bio arg. Data prediction uses BIO scheme"
-                    )
-                entity_type = row['entity_type']
+        for i, label in enumerate(pred_label_set.labels):
+            start, stop = label.start, label.start + label.length
+            entity_type = label.entity_type
             if args.binary:
-                text_pred[row['start']:row['stop']] = 1
+                text_pred[start:stop] = 1
             else:
-                text_pred[row['start']:row['stop']] = label2id_map[entity_type]
+                text_pred[start:stop] = label2id_map[entity_type]
 
         curr_performance = {}
         curr_performance['n_char'] = len(text)
