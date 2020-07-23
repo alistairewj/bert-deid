@@ -98,7 +98,7 @@ def apply(args):
         file_list.sort()
 
     # load model in
-    deid_model = Transformer(args.model_type, args.model_dir)
+    deid_model = Transformer(args.model_dir)
 
     # output will go to <filename>.deid
     if args.text_dir is not None:
@@ -126,3 +126,7 @@ def main(argv=sys.argv):
         apply(args)
     else:
         raise ValueError('Unrecognized action.')
+
+
+if __name__ == '__main__':
+    main()

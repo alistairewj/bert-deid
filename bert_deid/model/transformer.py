@@ -95,14 +95,9 @@ class Transformer(object):
     """Wrapper for a Transformer model to be applied for NER."""
     def __init__(
         self,
-        model_type,
         model_path,
-        # token_step_size=100,
-        # sequence_length=100,
-        max_seq_length=128,
         device='cpu',
-        bert_model_name_or_path='bert-base-uncased',
-        patterns=[],
+        patterns=None,
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
         self.num_labels = len(self.label_set.label_list)
@@ -113,18 +108,22 @@ class Transformer(object):
         # sequence_length is how long each example for the model is
         # self.sequence_length = sequence_length
 
+        # get the definition classes for the model
+        training_args = torch.load(
+            os.path.join(model_path, 'training_args.bin')
+        )
+        self.model_type = training_args.model_type
+
         # max seq length is what we pad the model to
         # max seq length should always be >= sequence_length + 2
-        self.max_seq_length = max_seq_length
+        self.max_seq_length = training_args.max_seq_length
 
-        # get the definition classes for the model
-        self.model_type = model_type.lower()
         config_class, model_class, tokenizer_class = MODEL_CLASSES[
             self.model_type]
 
-        if model_type == 'bert_crf':
+        if self.model_type == 'bert_crf':
             # use pretrained bert model path to initialize BertCRF object
-            new_model_path = bert_model_name_or_path
+            new_model_path = training_args.model_name_or_path
         else:
             new_model_path = model_path
         # Use cross entropy ignore index as padding label id so
@@ -134,7 +133,7 @@ class Transformer(object):
         self.config = config_class.from_pretrained(new_model_path)
         self.tokenizer = tokenizer_class.from_pretrained(new_model_path)
         model_param = {'pretrained_model_name_or_path': new_model_path}
-        if model_type == 'bert_extra_feature':
+        if self.model_type == 'bert_extra_feature':
             model_param['num_features'] = len(self.patterns)
         self.model = model_class.from_pretrained(**model_param)
 
