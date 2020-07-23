@@ -5,6 +5,7 @@ import logging
 
 from tqdm import tqdm
 from bert_deid.model.transformer import Transformer
+from bert_deid.download import download_model
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,16 @@ def parse_arguments(arguments=None):
     subparsers.required = True
 
     # sub-commands for the bert_deid interface
+
+    # download the model
+    apply = subparsers.add_parser(
+        "download", help=("Download the model to the given model directory.")
+    )
+
+    # apply the model to some text
     apply = subparsers.add_parser(
         "apply", help="Apply bert-deid to text or text files"
     )
-
     apply.add_argument(
         '--text',
         nargs='?',
@@ -58,6 +65,7 @@ def parse_arguments(arguments=None):
         help='De-identify all files in given folder.'
     )
     apply.add_argument('--repl', type=str, default='___')
+
     return parser.parse_args(arguments)
 
 
@@ -104,11 +112,17 @@ def apply(args):
         print(deid_model.apply(args.text, args.repl), file=sys.stdout)
 
 
+def download(args):
+    download_model(args.model_dir)
+
+
 def main(argv=sys.argv):
     # load in a trained model
     args = parse_arguments(argv[1:])
 
-    if args.actions == 'apply':
+    if args.actions == 'download':
+        download(args)
+    elif args.actions == 'apply':
         apply(args)
     else:
         raise ValueError('Unrecognized action.')
