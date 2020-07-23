@@ -12,5 +12,7 @@ transformers==2.3.0
 seqeval==0.0.12
 spacy==2.2.2
 stanfordnlp==0.2.0
+# downloading model
+google-cloud-storage==1.29.0
 # testing
 pytest==4.2.0
