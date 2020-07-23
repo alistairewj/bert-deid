@@ -86,3 +86,14 @@ python scripts/train_transformer.py --data_dir /data/deid-gs/i2b2_2014 --data_ty
 ```
 
 Note this will only use data from the `train` subfolder of the `--data_dir` arg. Once the model is trained it can be used as above.
+
+The `binary_evaluation.py` script can be used to assess performance on a test set. First, generate the predictions, then test them on the data:
+
+```sh
+export TEST_SET_PATH='/enc_data/deid-gs/i2b2_2014/test'
+export MODEL_PATH='/enc_data/models/bert-i2b2-2014'
+export PRED_PATH='out/'
+
+python scripts/output_preds.py --data_dir ${TEST_SET_PATH} --model_dir ${MODEL_PATH} --output_folder ${PRED_PATH}
+python scripts/binary_evaluation.py --pred_path ${PRED_PATH} --text_path ${TEST_SET_PATH}/txt --ref_path ${TEST_SET_PATH}/ann
+```
