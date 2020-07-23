@@ -7,11 +7,6 @@ from collections import namedtuple
 
 from bert_deid.label import Label, LabelCollection
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-    datefmt='%m/%d/%Y %H:%M:%S',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 Tag = namedtuple('Tag', ['name', 'start', 'offset'])

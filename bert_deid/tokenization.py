@@ -26,11 +26,6 @@ from bisect import bisect_left, bisect_right
 
 import numpy as np
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-    datefmt='%m/%d/%Y %H:%M:%S',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 
