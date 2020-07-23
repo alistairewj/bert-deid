@@ -328,9 +328,13 @@ def main():
     )
 
     # get the label to ID map from the label set
-    label2id_map = label_set.label_to_id
+    if args.binary:
+        label2id_map = {'O': 0, 'PHI': 1}
+    else:
+        label2id_map = label_set.label_to_id
+
     id2label_map = {label2id_map[key]: key for key in label2id_map}
-    label_list = list(label_set.label_list)
+    label_list = list(label2id_map.keys())
     label_list.remove('O')
 
     # read files from folder
