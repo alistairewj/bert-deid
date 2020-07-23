@@ -6,9 +6,9 @@ Code to fine-tune BERT on a medical note de-identification task.
 
 * **(Recommended)** Create an environment called `deid`
     * `conda env create -f environment.yml`
-<!-- * conda: `conda install bert_deid` -->
+<!-- * conda: `conda install bert-deid` -->
 * pip install locally
-    * `pip install bert_deid`
+    * `pip install bert-deid`
 
 ## Download
 
