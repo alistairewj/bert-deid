@@ -886,7 +886,7 @@ def tokenize_text(tokenizer, text):
         tokens = [token.text for token in doc]
     else:
         if tokenizer is None:
-            tokenizer = '\w'
+            tokenizer = r'\w'
         # treat string as a regex
         tokens = re.findall(tokenizer, text)
     return tokens

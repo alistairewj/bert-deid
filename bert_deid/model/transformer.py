@@ -40,11 +40,11 @@ from transformers import (
 )
 
 # custom class written for albert token classification
-from bert_deid.modeling import AlbertForTokenClassification
 from bert_deid import tokenization, processors
-from bert_deid.BERT_CRF import BertCRF
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
-from bert_deid.extra_feature import ModelExtraFeature
+from bert_deid.model.albert import AlbertForTokenClassification
+from bert_deid.model.crf import BertCRF
+from bert_deid.model.extra_feature import ModelExtraFeature
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
