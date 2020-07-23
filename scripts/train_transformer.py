@@ -62,6 +62,11 @@ try:
 except ImportError:
     from tensorboardX import SummaryWriter
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum(
@@ -1093,11 +1098,7 @@ def main():
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             eval_dataset = load_and_cache_examples(
-                args,
-                tokenizer,
-                processor,
-                pad_token_label_id,
-                mode='val'
+                args, tokenizer, processor, pad_token_label_id, mode='val'
             )
             result, _ = evaluate(
                 args=args,
