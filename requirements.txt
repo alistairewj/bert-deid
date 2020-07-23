@@ -8,7 +8,9 @@ pandas==0.24.2
 sympy==1.4
 # modelling
 torch==1.1.0
-pytorch-transformers==1.2.0
+transformers==2.3.0
 seqeval==0.0.12
+spacy==2.2.2
+stanfordnlp==0.2.0
 # testing
 pytest==4.2.0
