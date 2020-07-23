@@ -3,6 +3,7 @@ import csv
 import os
 import sys
 import logging
+from collections import namedtuple
 
 from bert_deid.label import Label, LabelCollection
 
@@ -13,10 +14,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+Tag = namedtuple('Tag', ['name', 'start', 'offset'])
+
 
 class InputExample(object):
     """A single training/test example."""
-    def __init__(self, guid, text, labels=None, patterns=[]):
+    def __init__(self, guid, text, labels=None, tags=None):
         """Constructs an InputExample.
 
         Args:
@@ -25,11 +28,18 @@ class InputExample(object):
             label: (Optional) list. Stand-off labels. List of lists.
                 Each element has the form:
                 (label_name, start_offset, length)
+            tags: (Optional) list. Stand-off features. List of lists.
+                Additional features for e.g. tagged entities. Expected format is as
+                a list of NamedTuples: [(name, start, length), ...].
+                These are converted into binary features and concatenated to the input.
+            
+            Note: If tokenization results in a token partially tagged by a feature,
+            the feature will be expanded to cover the entire token.
         """
         self.guid = guid
         self.text = text
         self.labels = labels
-        self.patterns = patterns
+        self.tags = tags
 
 
 class DataProcessor(object):
@@ -47,10 +57,10 @@ class DataProcessor(object):
         else:
             return list(self.label_set.label_list)
 
-    def _create_examples(self, fn, mode, patterns=[]):
+    def _create_examples(self, fn, mode):
         raise NotImplementedError()
 
-    def get_examples(self, mode, patterns=[]):
+    def get_examples(self, mode):
         if mode not in ('train', 'test', 'val'):
             raise ValueError(
                 (
@@ -67,7 +77,7 @@ class DataProcessor(object):
             )
 
         fn = os.path.join(self.data_dir, self.data_filenames[mode])
-        return self._create_examples(fn, mode, patterns)
+        return self._create_examples(fn, mode)
 
     def _read_file(self, input_file, delimiter=',', quotechar='"'):
         """Reads a comma separated value file."""
@@ -105,7 +115,7 @@ class CoNLLProcessor(DataProcessor):
         )
 
     # def _create_examples(self, lines, set_type):
-    def _create_examples(self, fn, set_type, patterns=[]):
+    def _create_examples(self, fn, set_type):
         """Creates examples for the training and test sets."""
         examples = []
         sentence = []
@@ -141,10 +151,7 @@ class CoNLLProcessor(DataProcessor):
                 sentence = ' '.join(sentence)
                 examples.append(
                     InputExample(
-                        guid=guid,
-                        text=sentence,
-                        labels=label_offsets,
-                        patterns=patterns
+                        guid=guid, text=sentence, labels=label_offsets
                     )
                 )
                 sentence = []
@@ -164,13 +171,15 @@ class CoNLLProcessor(DataProcessor):
 
 class DeidProcessor(DataProcessor):
     """Processor for the de-id datasets."""
-    def __init__(self, data_dir, label_set):
+    def __init__(self, data_dir, label_set, tagger=None):
         """Initialize a data processor with the location of the data."""
         super().__init__(data_dir)
         self.data_filenames = {'train': 'train', 'test': 'test'}
         self.label_set = label_set
 
-    def _create_examples(self, fn, set_type, patterns=[]):  # lines, set_type):
+        self.tagger = tagger
+
+    def _create_examples(self, fn, set_type):
         """Creates examples for the training, validation, and test sets."""
         examples = []
 
@@ -195,12 +204,18 @@ class DeidProcessor(DataProcessor):
             #   root_path/txt/RECORD_NAME.txt - has text
             #   root_path/ann/RECORD_NAME.gs - has annotations
             self.label_set.from_csv(fn)
+
+            tags = None
+            if self.tagger is not None:
+                # call a function to generate binary tagging features
+                tags = self.tagger(text)
+
             examples.append(
                 InputExample(
                     guid=guid,
                     text=text,
                     labels=self.label_set.labels,
-                    patterns=patterns
+                    tags=tags
                 )
             )
 

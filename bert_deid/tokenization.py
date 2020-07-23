@@ -23,8 +23,6 @@ import os
 import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
-# from bert_deid.pattern import create_extra_feature_vectors
-from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
 
 import numpy as np
 
@@ -47,7 +45,7 @@ class InputFeatures(object):
         input_subwords=None,
         input_offsets=None,
         input_lengths=None,
-        extra_feature=None,
+        additional_features=None,
     ):
         self.input_ids = input_ids
         self.input_mask = input_mask
@@ -59,7 +57,8 @@ class InputFeatures(object):
         self.input_offsets = input_offsets
         self.input_lengths = input_lengths
 
-        self.extra_feature = extra_feature
+        if additional_features is not None:
+            self.additional_features = additional_features
 
 
 def pattern_spans(text, pattern):
@@ -260,6 +259,40 @@ def tokenize_with_labels(
     return word_tokens, token_labels, token_sw, offsets, lengths
 
 
+def map_tags_to_tokens(example, offsets):
+    # initialize feature as 0
+    # set subword tokens to padded token
+    tags = collections.OrderedDict()
+
+    for tag in example.tags:
+        name = tag.name
+        start, offset = tag.start, tag.length
+        stop = start + offset
+
+        if name not in tags:
+            # initialize feature to all 0s
+            tags[name] = np.zeros(len(offsets), dtype=int)
+
+        # get the first offset > than the label start index
+        i = bisect_left(offsets, start)
+        if i == len(offsets):
+            # we have labeled a token at the end of the text
+            # also catches the case that we label a part of a token
+            # at the end of the text, but not the entire token
+            tags[name][-1] = 1
+        else:
+            # find the last token which is within this label
+            j = bisect_left(offsets, stop)
+
+            # assign all tokens between [start, stop] to this label
+            tags[name][i:j] = 1
+
+    # convert tags to an NxM numpy array
+    # N is the number of tokens, M is the number of distinct entities
+    tags = np.column_stack(list(tags.values()))
+    return tags
+
+
 def convert_examples_to_features(
     examples,
     label_to_id,
@@ -301,19 +334,16 @@ def convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d", ex_index, len(examples))
 
-        patterns = example.patterns
-        pattern_label = 1
-        ex_phi_locs = []
-        for pattern in patterns:
-            ex_phi_locs.append(
-                find_phi_location(pattern, pattern_label, example.text)
-            )
-
-        assert (len(patterns) == len(ex_phi_locs))
-
         ex_tokens, ex_labels, ex_token_sw, ex_offsets, ex_lengths = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
         )
+
+        # add binary tags as additional features to the model
+        if example.tags is not None:
+            add_features = True
+            ex_additional_features = map_tags_to_tokens(example, ex_offsets)
+        else:
+            add_features = False
 
         # assign labels based off the offsets
         ex_label_ids = [
@@ -339,6 +369,11 @@ def convert_examples_to_features(
             token_sw = ex_token_sw[t:t + max_seq_length - special_tokens_count]
             label_ids = ex_label_ids[t:t + max_seq_length -
                                      special_tokens_count]
+            # NOTE: unlike the above, add_feat is an N_token x M_feature numpy array
+            if add_features:
+                additional_features = ex_additional_features[
+                    t:t + max_seq_length - special_tokens_count, :]
+                n_features = ex_additional_features.shape[1]
 
             # The convention in BERT is:
             # (a) For sequence pairs:
@@ -363,6 +398,7 @@ def convert_examples_to_features(
             lengths += [-1]
             token_sw += [False]
             label_ids += [pad_token_label_id]
+
             if sep_token_extra:
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
@@ -387,6 +423,37 @@ def convert_examples_to_features(
                 label_ids = [pad_token_label_id] + label_ids
                 segment_ids = [cls_token_segment_id] + segment_ids
 
+            # repeat the above 3 additions for additional features
+            if add_features:
+                if sep_token_extra:
+                    additional_features = np.concatenate(
+                        [
+                            additional_features,
+                            np.zeros([2, n_features], dtype=int)
+                        ]
+                    )
+                else:
+                    additional_features = np.concatenate(
+                        [
+                            additional_features,
+                            np.zeros([1, n_features], dtype=int)
+                        ]
+                    )
+                if cls_token_at_end:
+                    additional_features = np.concatenate(
+                        [
+                            additional_features,
+                            np.zeros([1, n_features], dtype=int)
+                        ]
+                    )
+                else:
+                    additional_features = np.concatenate(
+                        [
+                            np.zeros([1, n_features], dtype=int),
+                            additional_features
+                        ]
+                    )
+
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
@@ -408,6 +475,13 @@ def convert_examples_to_features(
                 offsets = ([-1] * padding_length) + offsets
                 lengths = ([-1] * padding_length) + lengths
                 token_sw = ([False] * padding_length) + token_sw
+                if add_features:
+                    additional_features = np.concatenate(
+                        [
+                            np.zeros([padding_length, n_features], dtype=int),
+                            additional_features
+                        ]
+                    )
             else:
                 input_ids += [pad_token_input_id] * padding_length
                 input_mask += [
@@ -418,13 +492,13 @@ def convert_examples_to_features(
                 offsets += [-1] * padding_length
                 lengths += [-1] * padding_length
                 token_sw += [False] * padding_length
-
-            extra_features = []
-            for i in range(len(ex_phi_locs)):
-                extra_feature = create_extra_feature_vector(
-                    ex_phi_locs[i], offsets, lengths, token_sw
-                )
-                extra_features.append(extra_feature)
+                if add_features:
+                    additional_features = np.concatenate(
+                        [
+                            additional_features,
+                            np.zeros([padding_length, n_features])
+                        ]
+                    )
 
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
@@ -433,9 +507,10 @@ def convert_examples_to_features(
             assert len(offsets) == max_seq_length
             assert len(lengths) == max_seq_length
             assert len(token_sw) == max_seq_length
-            if len(extra_features) > 0:
-                assert len(extra_features[0]) == max_seq_length
-                assert len(extra_features) == len(example.patterns)
+            if add_features:
+                assert additional_features.shape[0] == max_seq_length
+            else:
+                additional_features = None
 
             if n_obs < 5:
                 logger.info("*** Example ***")
@@ -456,10 +531,9 @@ def convert_examples_to_features(
                 logger.info(
                     "label_ids: %s", " ".join([str(x) for x in label_ids])
                 )
-                for each_feature in extra_features:
+                if add_features:
                     logger.info(
-                        'extra feature: %s',
-                        ' '.join([str(x) for x in each_feature])
+                        f'{additional_features.shape[1]} extra features added'
                     )
                 logger.info("offsets: %s", " ".join([str(x) for x in offsets]))
 
@@ -472,7 +546,7 @@ def convert_examples_to_features(
                     input_offsets=offsets,
                     input_lengths=lengths,
                     input_subwords=token_sw,
-                    extra_feature=extra_features,
+                    additional_features=additional_features,
                 )
             )
             n_obs += 1

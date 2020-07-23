@@ -35,31 +35,14 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
 from transformers import (
-    WEIGHTS_NAME,
-    AdamW,
-    AlbertConfig,
-    AlbertTokenizer,
-    BertConfig,
-    BertForTokenClassification,
-    BertTokenizer,
-    BertModel,
-    CamembertConfig,
-    CamembertForTokenClassification,
-    CamembertTokenizer,
-    DistilBertConfig,
-    DistilBertForTokenClassification,
-    DistilBertTokenizer,
-    RobertaConfig,
-    RobertaForTokenClassification,
-    RobertaTokenizer,
-    XLMRobertaConfig,
-    XLMRobertaForTokenClassification,
-    XLMRobertaTokenizer,
-    get_linear_schedule_with_warmup,
-    AutoConfig,
-    AutoModelWithLMHead,
-    AutoTokenizer,
-    AutoModel
+    WEIGHTS_NAME, AdamW, AlbertConfig, AlbertTokenizer, BertConfig,
+    BertForTokenClassification, BertTokenizer, BertModel, CamembertConfig,
+    CamembertForTokenClassification, CamembertTokenizer, DistilBertConfig,
+    DistilBertForTokenClassification, DistilBertTokenizer, RobertaConfig,
+    RobertaForTokenClassification, RobertaTokenizer, XLMRobertaConfig,
+    XLMRobertaForTokenClassification, XLMRobertaTokenizer,
+    get_linear_schedule_with_warmup, AutoConfig, AutoModelWithLMHead,
+    AutoTokenizer, AutoModel
 )
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
@@ -70,18 +53,9 @@ from bert_deid.extra_feature import ModelExtraFeature
 # PROCESSORS = processors.PROCESSORS
 from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
-# use pydeid for adding extra feature 
+# use pydeid for adding extra feature
 import pydeid
 import pkgutil
-
-from pydeid.annotators import _patterns
-# load all modules on path
-pkg = 'pydeid.annotators._patterns'
-PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    _patterns.__path__
-)]
-PATTERN_NAMES.remove('_pattern')
-_PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -118,7 +92,6 @@ MODEL_CLASSES = {
         ),
     "bert_crf": (BertConfig, BertModel, BertTokenizer),
     "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizer),
-
 }
 
 
@@ -384,6 +357,11 @@ def argparser():
         default=0.1,
         help="Dropout rate for BERT-CRF"
     )
+
+    _PATTERN_NAMES = (
+        'age', 'date', 'email', 'idnum', 'initials', 'location', 'mrn', 'name',
+        'pager', 'ssn', 'telephone', 'unit', 'url', 'all'
+    )
     parser.add_argument(
         "--feature",
         type=str,
@@ -391,7 +369,7 @@ def argparser():
         default=None,
         choices=_PATTERN_NAMES,
         help="Perform rule-based approach with pydeid patterns: "
-            f"{', '.join(_PATTERN_NAMES)}"
+        f"{', '.join(_PATTERN_NAMES)}"
     )
 
     return parser
@@ -432,7 +410,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
 
     # Prepare optimizer and schedule (linear warmup and decay)
     # no_decay = ["bias", "LayerNorm.weight"]
-    no_decay = ['bias', 'LayerNorm.bias','LayerNorm.weight']
+    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {
             "params":
@@ -588,7 +566,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
             loss = outputs[
                 0
             ]  # model outputs are always tuple in pytorch-transformers (see doc) \
-               # also for BertCRF returns (negative log-likelihood, predicted tag seq)
+            # also for BertCRF returns (negative log-likelihood, predicted tag seq)
 
             if args.n_gpu > 1:
                 loss = loss.mean(
@@ -630,8 +608,7 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
                             tokenizer=tokenizer,
                             processor=processor,
                             pad_token_label_id=pad_token_label_id,
-                            mode='dev',
-                            patterns=args.patterns
+                            mode='dev'
                         )
                         results, _ = evaluate(
                             args=args,
@@ -703,7 +680,14 @@ def train(args, train_dataset, model, tokenizer, processor, pad_token_label_id):
 
 
 def evaluate(
-    args, eval_dataset, model, tokenizer, processor, pad_token_label_id, mode, prefix=""
+    args,
+    eval_dataset,
+    model,
+    tokenizer,
+    processor,
+    pad_token_label_id,
+    mode,
+    prefix=""
 ):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
@@ -799,7 +783,7 @@ def evaluate(
 
 
 def load_and_cache_examples(
-    args, tokenizer, processor, pad_token_label_id, mode, patterns
+    args, tokenizer, processor, pad_token_label_id, mode
 ):
     if args.local_rank not in [-1, 0] and not evaluate:
         # Make sure only the first process in distributed
@@ -823,8 +807,10 @@ def load_and_cache_examples(
         features = torch.load(cached_features_file)
     else:
         logger.info("Creating features from dataset file at %s", args.data_dir)
+
         # get examples (mode can be 'train', 'test', or 'val')
-        examples = processor.get_examples(mode, patterns)
+        examples = processor.get_examples(mode)
+
         features = tokenization.convert_examples_to_features(
             examples,
             processor.label_set.label_to_id,
@@ -843,7 +829,7 @@ def load_and_cache_examples(
             pad_token=tokenizer.pad_token,
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
             pad_token_label_id=pad_token_label_id,
-            feature_overlap=0.1
+            feature_overlap=0.1,
         )
         if args.local_rank in [-1, 0]:
             logger.info(
@@ -869,13 +855,21 @@ def load_and_cache_examples(
     all_label_ids = torch.tensor(
         [f.label_ids for f in features], dtype=torch.long
     )
-    all_extra_features = torch.tensor(
-        [f.extra_feature for f in features], dtype=torch.long
-    )
 
-    dataset = TensorDataset(
-        all_input_ids, all_input_mask, all_segment_ids, all_label_ids, all_extra_features
-    )
+    if hasattr(features[0], 'additional_features'):
+        all_additional_features = torch.tensor(
+            [f.additional_features for f in features], dtype=torch.long
+        )
+
+        dataset = TensorDataset(
+            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+            all_additional_features
+        )
+    else:
+        dataset = TensorDataset(
+            all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+        )
+
     return dataset
 
 
@@ -944,28 +938,28 @@ def main():
         args.data_type, args.bio, transform=args.label_transform
     )
     args.num_labels = len(label_set.label_list)
+
+    # if requested, we can add binary features tagged by pydeid
+    # this has a dependency on pydeid
+    if args.feature is not None:
+        from bert_deid.pydeid_feature import apply_pydeid_to_text
+        get_additional_features = lambda x: apply_pydeid_to_text(
+            x, patterns=args.feature
+        )
+        logger.info(f"Adding features: {', '.join(args.feature)}.")
+    else:
+        if args.model_type == 'bert_extra_feature':
+            raise ValueError(
+                "Add pydeid pattern to perform bert-feature ensemble"
+            )
+        get_additional_features = None
+
     processor = processors.DeidProcessor(
-        args.data_dir,
-        label_set
+        args.data_dir, label_set, get_additional_features
     )
 
-    labels = processor.label_set.label_list
-    label_map = processor.label_set.label_to_id
-
-    args.patterns = []
-    if args.feature is not None:
-        for f in args.feature:
-            f = f.lower()
-            if f not in _PATTERN_NAMES:
-                raise ValueError("Invalid feature name")
-            args.patterns.append(f)
-    if 'all' in args.patterns:
-        args.patterns = PATTERN_NAMES
-    print ('patterns', args.patterns)
-
-    if args.model_type == 'bert_extra_feature':
-        if len(args.patterns) == 0:
-            raise ValueError("Add pydeid pattern to perform bert-feature ensemble")
+    # labels = processor.label_set.label_list
+    # label_map = processor.label_set.label_to_id
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
@@ -998,7 +992,7 @@ def main():
     }
 
     if args.model_type == 'bert_extra_feature':
-        model_params['num_features'] = len(args.patterns)
+        model_params['num_features'] = len(args.feature)
 
     model = model_class.from_pretrained(**model_params)
 
@@ -1011,12 +1005,16 @@ def main():
 
     # label2id = processor.label_set.label_to_id
     if args.model_type == 'bert_crf':
-        model = BertCRF(num_classes=args.num_labels, bert_model=model, device=args.device,dropout=args.crf_dropout)
+        model = BertCRF(
+            num_classes=args.num_labels,
+            bert_model=model,
+            device=args.device,
+            dropout=args.crf_dropout
+        )
 
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index
-
 
     if args.local_rank == 0:
         # Make sure only the first process in distributed training
@@ -1027,16 +1025,14 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
-
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(
-            args=args, 
-            tokenizer=tokenizer, 
-            processor=processor, 
+            args=args,
+            tokenizer=tokenizer,
+            processor=processor,
             pad_token_label_id=pad_token_label_id,
-            mode="train", 
-            patterns=args.patterns
+            mode="train"
         )
         global_step, tr_loss = train(
             args, train_dataset, model, tokenizer, processor, pad_token_label_id
@@ -1096,7 +1092,13 @@ def main():
                 global_step = ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            eval_dataset=load_and_cache_examples(args, tokenizer, processor, pad_token_label_id, mode='val', patterns=args.patterns)
+            eval_dataset = load_and_cache_examples(
+                args,
+                tokenizer,
+                processor,
+                pad_token_label_id,
+                mode='val'
+            )
             result, _ = evaluate(
                 args=args,
                 eval_dataset=eval_dataset,
@@ -1124,14 +1126,20 @@ def main():
         )
         model = model_class.from_pretrained(args.output_dir)
         model.to(args.device)
-        test_dataset = load_and_cache_examples(args, tokenizer, processor, pad_token_label_id=pad_token_label_id,mode='test')
+        test_dataset = load_and_cache_examples(
+            args,
+            tokenizer,
+            processor,
+            pad_token_label_id=pad_token_label_id,
+            mode='test'
+        )
         result, predictions = evaluate(
-            args=args, 
+            args=args,
             eval_dataset=test_dataset,
-            model=model, 
-            tokenizer=tokenizer, 
-            processor=processor, 
-            pad_token_label_id=pad_token_label_id, 
+            model=model,
+            tokenizer=tokenizer,
+            processor=processor,
+            pad_token_label_id=pad_token_label_id,
             mode="test"
         )
         # Save results
