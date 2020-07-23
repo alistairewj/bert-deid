@@ -25,9 +25,9 @@ class EnvDefault(argparse.Action):
 
 def parse_arguments(arguments=None):
     parser = argparse.ArgumentParser(
-        description="BERT-Deid Command Line Interface"
+        description="bert-deid command line interface"
     )
-
+    # shared arguments
     parser.add_argument(
         '--model_dir',
         action=EnvDefault,
@@ -36,26 +36,32 @@ def parse_arguments(arguments=None):
         help='Folder containing model to use'
     )
     parser.add_argument('--model_type', required=False, default='bert', help='')
-    parser.add_argument(
+
+    subparsers = parser.add_subparsers(dest="actions", title="actions")
+    subparsers.required = True
+
+    # sub-commands for the bert_deid interface
+    apply = subparsers.add_parser(
+        "apply", help="Apply bert-deid to text or text files"
+    )
+
+    apply.add_argument(
         '--text',
         nargs='?',
         type=str,
         default=(None if sys.stdin.isatty() else sys.stdin)
     )
-    parser.add_argument(
+    apply.add_argument(
         '--text_dir',
         type=str,
         default=None,
         help='De-identify all files in given folder.'
     )
-    parser.add_argument('--repl', type=str, default='___')
+    apply.add_argument('--repl', type=str, default='___')
     return parser.parse_args(arguments)
 
 
-def main(argv=sys.argv):
-    # load in a trained model
-    args = parse_arguments(argv[1:])
-
+def apply(args):
     # if we have a files argument, we will run this over many files
     if args.text_dir is not None:
         if args.text is not None:
@@ -96,3 +102,13 @@ def main(argv=sys.argv):
                 fp.write(text_deid)
     else:
         print(deid_model.apply(args.text, args.repl), file=sys.stdout)
+
+
+def main(argv=sys.argv):
+    # load in a trained model
+    args = parse_arguments(argv[1:])
+
+    if args.actions == 'apply':
+        apply(args)
+    else:
+        raise ValueError('Unrecognized action.')
