@@ -236,15 +236,9 @@ def main():
     )
 
     parser.add_argument(
-        "--binary_eval",
+        "--binary",
         action="store_true",
-        help="Do binary evaluation, phi instances or not"
-    )
-
-    parser.add_argument(
-        "--multi_eval",
-        action="store_true",
-        help="Multi NER evaluation, correct phi instances or not"
+        help="Do binary evaluation (PHI or not)"
     )
 
     parser.add_argument(
@@ -357,15 +351,11 @@ def main():
     if args.bio:
         is_bio += 'with BIO scheme transformation on label'
 
-    if args.binary_eval and not args.multi_eval:
+    if args.binary:
         logger.info("***** Running binary evaluation {} *****".format(is_bio))
-    elif args.multi_eval and not args.binary_eval:
+    else:
         logger.info(
             "***** Running multi-class evaluation {} *****".format(is_bio)
-        )
-    else:
-        raise ValueError(
-            "Invalid input arguments, either binary or multi-class evaluation"
         )
 
     logger.info(" Num examples = %d", len(input_files))
@@ -407,7 +397,7 @@ def main():
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
         for i, row in gs.iterrows():
-            if args.binary_eval:
+            if args.binary:
                 text_tar[row['start']:row['stop']] = 1
             else:
                 if args.label_transform is not None:
@@ -438,7 +428,7 @@ def main():
                         "Required --bio arg. Data prediction uses BIO scheme"
                     )
                 entity_type = row['entity_type']
-            if args.binary_eval:
+            if args.binary:
                 text_pred[row['start']:row['stop']] = 1
             else:
                 text_pred[row['start']:row['stop']] = label2id_map[entity_type]
@@ -489,8 +479,8 @@ def main():
         fp_list_entity, fn_list_entity = None, None
         # report performance entity-wise (only when label is transformed)
         if args.bio:
-            df = merge_BIO_pred(df, args.binary_eval, args.expand_eval, text)
-            if args.binary_eval:
+            df = merge_BIO_pred(df, args.binary, args.expand_eval, text)
+            if args.binary:
                 gs['entity_type'] = 'phi'
             # ignore punctuation punshiment at front/end
             true = utils.ignore_partials(utils.get_entities(gs))
