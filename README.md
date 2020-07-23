@@ -4,11 +4,21 @@ Code to fine-tune BERT on a medical note de-identification task.
 
 ## Install
 
-There are three options for installation:
+* **(Recommended)** Create an environment called `deid`
+    * `conda env create -f environment.yml`
+<!-- * conda: `conda install bert_deid` -->
+* pip install locally
+    * `pip install bert_deid`
 
-* Create an environment called `deid` **(recommended)**: `conda env create -f environment.yml`
-* conda: `conda install bert_deid`
-* pip: `pip install bert_deid`
+## Download
+
+To download the model, we have provided a helper script in bert-deid:
+
+```sh
+# note: MODEL_DIR environment variable used by download
+export MODEL_DIR="~/bert_deid_model/"
+bert_deid download
+```
 
 ## Usage
 
@@ -87,7 +97,7 @@ python scripts/train_transformer.py --data_dir /data/deid-gs/i2b2_2014 --data_ty
 
 Note this will only use data from the `train` subfolder of the `--data_dir` arg. Once the model is trained it can be used as above.
 
-The `binary_evaluation.py` script can be used to assess performance on a test set. First, generate the predictions, then test them on the data:
+The `binary_evaluation.py` script can be used to assess performance on a test set. First, we'll need to generate the predictions:
 
 ```sh
 export TEST_SET_PATH='/enc_data/deid-gs/i2b2_2014/test'
@@ -95,5 +105,43 @@ export MODEL_PATH='/enc_data/models/bert-i2b2-2014'
 export PRED_PATH='out/'
 
 python scripts/output_preds.py --data_dir ${TEST_SET_PATH} --model_dir ${MODEL_PATH} --output_folder ${PRED_PATH}
+```
+
+This outputs the predictions to the `out` folder. If we look at one of the files, we can see each prediction is a CSV of stand-off annotations. Here are the top few lines from the `110-01.pred` file:
+
+```
+document_id,annotation_id,start,stop,entity,entity_type,comment
+110-01,4,16,20,2069,DATE,
+110-01,5,20,21,-,DATE,
+110-01,6,21,23,04,DATE,
+110-01,7,23,24,-,DATE,
+110-01,8,24,26,07,DATE,
+```
+
+We can now evaluate the predictions using the ground truth:
+
+```sh
 python scripts/binary_evaluation.py --pred_path ${PRED_PATH} --text_path ${TEST_SET_PATH}/txt --ref_path ${TEST_SET_PATH}/ann
+```
+
+For our trained model, this returned:
+
+* Macro Se: 0.9818
+* Macro P+: 0.9885
+* Macro F1: 0.9840
+* Micro Se: 0.9816
+* Micro P+: 0.9892
+* Micro F1: 0.9854
+
+We can also look at individual predictions for a given file:
+
+```sh
+export FN=110-02
+python scripts/print_annotation.py -p ${PRED_PATH}/${FN}.pred -t ${TEST_SET_PATH}/txt/${FN}.txt -r ${TEST_SET_PATH}/ann/${FN}.gs
+```
+
+If we would like a multi-class evaluation, we need to know about any label transformations done by the model, so we call a different script:
+
+```sh
+python scripts/eval.py --model_dir ${MODEL_PATH} --pred_path ${PRED_PATH} --text_path ${TEST_SET_PATH}/txt --ref_path ${TEST_SET_PATH}/ann
 ```
