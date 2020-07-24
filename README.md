@@ -20,7 +20,29 @@ export MODEL_DIR="~/bert_deid_model/"
 bert_deid download
 ```
 
-## Usage
+## Usage (Shell)
+
+From the command line, we can call `bert_deid` to apply it to any given text:
+
+```sh
+export MODEL_DIR="~/bert_deid_model/"
+bert_deid apply --text "hello dr. somayah"
+```
+
+Text can also be piped to `bert_deid`. Alternatively, the `--text_dir` argument allows running the package on all files in a folder:
+
+```sh
+mkdir tmp
+echo "hello dr. somayah" > tmp/example1.txt
+echo "No pneumothorax since 2019-01-01." > tmp/example2.txt
+bert_deid apply --text_dir tmp
+```
+
+Deidentified files are output with the `.deid` extension, e.g. `tmp/example1.txt` would become `tmp/example1.txt.deid`.
+
+## Usage (Python)
+
+The model can also be imported and used directly within Python.
 
 ```python
 from bert_deid.model import Transformer
