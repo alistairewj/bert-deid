@@ -26,7 +26,8 @@ def download_model(model_dir=None):
     """
     os.makedirs(model_dir, exist_ok=True)
 
-    bucket_name = 'gs://bert-deid-1.0.0.physionet.org'
+    # NOTE: omit "gs://" from bucket names
+    bucket_name = 'bert-deid'
     files = [
         'added_tokens.json', 'config.json', 'label_set.bin',
         'pytorch_model.bin', 'special_tokens_map.json', 'tokenizer_config.json',
@@ -34,5 +35,8 @@ def download_model(model_dir=None):
     ]
     logger.info(f'Beginning download of model files to {model_dir}')
     for fn in files:
-        download_blob(bucket_name, f'model/{fn}', f'{model_dir}/{fn}')
-        logger.info(f'Completed download for {fn}')
+        logger.info(
+            f'Downloading {bucket_name}/bert-i2b2-2014/{fn} to {model_dir}/{fn}'
+        )
+        download_blob(bucket_name, f'bert-i2b2-2014/{fn}', f'{model_dir}/{fn}')
+    logger.info(f'Completed all downloads.')
