@@ -15,6 +15,7 @@ setuptools.setup(
     license='Apache 2.0',
     packages=setuptools.find_packages(),
     install_requires=[],
+    python_requires='>=3.6',
     entry_points={
         'console_scripts': ['bert_deid = bert_deid.__main__:main'],
         'bert_deid.__main__':
