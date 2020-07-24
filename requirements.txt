@@ -1,5 +1,5 @@
 # text
-nltk==3.4.3
+nltk==3.4.5
 # progress bars
 tqdm==4.32.1
 # numbers
