@@ -1,15 +1,14 @@
 import setuptools
 
-
-def readme():
-    with open('README.md') as f:
-        return f.read()
-
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 setuptools.setup(
     name='bert_deid',
     version='0.2.1',
     description='Remove identifiers from data using BERT',
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     url='https://github.com/alistairewj/bert-deid',
     author='Alistair Johnson',
     author_email='aewj@mit.edu',
