@@ -6,7 +6,12 @@ import logging
 from tqdm import tqdm
 from bert_deid.model.transformer import Transformer
 from bert_deid.download import download_model
+from bert_deid.download import logger as download_logger
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +126,8 @@ def main(argv=sys.argv):
     args = parse_arguments(argv[1:])
 
     if args.actions == 'download':
+        # add logging if we call download from command line
+        download_logger.setLevel(logging.INFO)
         download(args)
     elif args.actions == 'apply':
         apply(args)
