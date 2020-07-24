@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='bert_deid',
-    version='0.2.1',
+    version='0.2.2',
     description='Remove identifiers from data using BERT',
     long_description=long_description,
     long_description_content_type="text/markdown",
