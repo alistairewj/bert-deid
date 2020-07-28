@@ -1,4 +1,3 @@
-
 """
 Runs BERT deid on a set of text files.
 Evaluates the output using gold standard annotations.
@@ -37,7 +36,10 @@ def main():
         "--pred_path", required=True, type=str, help="Path for model labels."
     )
     parser.add_argument(
-        "--adjuvant_path", default=None, type=str, help="Path for additional model labels."
+        "--adjuvant_path",
+        default=None,
+        type=str,
+        help="Path for additional model labels."
     )
     parser.add_argument(
         "--text_path",
@@ -156,7 +158,9 @@ def main():
             fn_pred = adjuvant_path / f'{fn}{pred_ext}'
             if fn_pred.exists():
                 df2 = pd.read_csv(
-                    fn_pred, header=0, dtype={
+                    fn_pred,
+                    header=0,
+                    dtype={
                         'entity': str,
                         'entity_type': str
                     }

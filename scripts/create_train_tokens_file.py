@@ -16,11 +16,14 @@ def main(args):
     parser = argparse.ArgumentParser()
 
     # Required parameters
-    parser.add_argument('-c', "--config",
-                        required=True,
-                        type=str,
-                        help=("Configuration file (json)."
-                              "Specifies folders and parameters."))
+    parser.add_argument(
+        '-c',
+        "--config",
+        required=True,
+        type=str,
+        help=("Configuration file (json)."
+              "Specifies folders and parameters.")
+    )
 
     args = parser.parse_args(args)
 
@@ -60,12 +63,12 @@ def main(args):
     txt_files = os.listdir(txt_path)
 
     # filter to files with correct extension // that overlap
-    ann_files = set([f[0:-len(ann_ext)]
-                     for f in ann_files
-                     if f.endswith(ann_ext)])
-    txt_files = set([f[0:-len(txt_ext)]
-                     for f in txt_files
-                     if f.endswith(txt_ext)])
+    ann_files = set(
+        [f[0:-len(ann_ext)] for f in ann_files if f.endswith(ann_ext)]
+    )
+    txt_files = set(
+        [f[0:-len(txt_ext)] for f in txt_files if f.endswith(txt_ext)]
+    )
     records = list(ann_files.intersection(txt_files))
 
     if len(records) == 0:

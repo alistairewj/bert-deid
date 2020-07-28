@@ -24,11 +24,14 @@ def main(args):
     parser = argparse.ArgumentParser()
 
     # Required parameters
-    parser.add_argument('-c', "--config",
-                        required=True,
-                        type=str,
-                        help=("Configuration file (json)."
-                              "Specifies folders and parameters."))
+    parser.add_argument(
+        '-c',
+        "--config",
+        required=True,
+        type=str,
+        help=("Configuration file (json)."
+              "Specifies folders and parameters.")
+    )
 
     args = parser.parse_args(args)
 
@@ -38,9 +41,8 @@ def main(args):
 
     # hard-coded list of parameters for bert training
     csv_arg_names = [
-        'input_path', 'text_extension', 'ref_extension',
-        'data_path', 'task_name', 'group_tags',
-        'method', 'step_size', 'sequence_length',
+        'input_path', 'text_extension', 'ref_extension', 'data_path',
+        'task_name', 'group_tags', 'method', 'step_size', 'sequence_length',
         'bert_model', 'quiet'
     ]
 
@@ -56,9 +58,7 @@ def main(args):
 
     # adding an input_test_path arg lets us generate test.csv
     if 'input_test_path' in config:
-        print('Generating test set using {}'.format(
-            config['input_test_path']
-        ))
+        print('Generating test set using {}'.format(config['input_test_path']))
         create_csv_args['input_path'] = config['input_test_path']
         csv_arg_list = arg_dict_to_list(create_csv_args)
         create_csv.main(csv_arg_list)
@@ -67,13 +67,11 @@ def main(args):
 
     # hard-coded list of parameters for bert training
     bert_arg_names = [
-        'data_path', 'bert_model', 'task_name', 'model_path',
-        'cache_dir', 'max_seq_length',
-        'do_train', 'finetune',
-        'do_eval', 'do_lower_case', 'train_batch_size',
-        'eval_batch_size', 'learning_rate', 'num_train_epochs',
-        'warmup_proportion', 'no_cuda', 'local_rank', 'seed',
-        'gradient_accumulation_steps', 'fp16', 'loss_scale',
+        'data_path', 'bert_model', 'task_name', 'model_path', 'cache_dir',
+        'max_seq_length', 'do_train', 'finetune', 'do_eval', 'do_lower_case',
+        'train_batch_size', 'eval_batch_size', 'learning_rate',
+        'num_train_epochs', 'warmup_proportion', 'no_cuda', 'local_rank',
+        'seed', 'gradient_accumulation_steps', 'fp16', 'loss_scale',
         'server_ip', 'server_port'
     ]
 

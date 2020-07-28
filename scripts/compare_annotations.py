@@ -15,21 +15,41 @@ import csv
 import argparse
 
 parser = argparse.ArgumentParser(description='Convert ann files to gs files')
-parser.add_argument('-p', '--path', type=str,
-                    default='/data/deid-gs/rr-set-to-fix/ann',
-                    help='path containing files to compare')
-parser.add_argument('-c', '--compare', type=str,
-                    default='/db/git/rr-set-to-fix/deid',
-                    help='path containing files to compare')
-parser.add_argument('-t', '--text', type=str,
-                    default='/db/git/rr-set-to-fix/txt',
-                    help='path with text files')
-parser.add_argument('-o', '--output', type=str,
-                    default='/db/git/rr-set-to-fix/fixed',
-                    help='output path')
-parser.add_argument('-r', '--review', type=str,
-                    default='/db/git/rr-set-to-fix/review',
-                    help='review path for outputting uncertain anns')
+parser.add_argument(
+    '-p',
+    '--path',
+    type=str,
+    default='/data/deid-gs/rr-set-to-fix/ann',
+    help='path containing files to compare'
+)
+parser.add_argument(
+    '-c',
+    '--compare',
+    type=str,
+    default='/db/git/rr-set-to-fix/deid',
+    help='path containing files to compare'
+)
+parser.add_argument(
+    '-t',
+    '--text',
+    type=str,
+    default='/db/git/rr-set-to-fix/txt',
+    help='path with text files'
+)
+parser.add_argument(
+    '-o',
+    '--output',
+    type=str,
+    default='/db/git/rr-set-to-fix/fixed',
+    help='output path'
+)
+parser.add_argument(
+    '-r',
+    '--review',
+    type=str,
+    default='/db/git/rr-set-to-fix/review',
+    help='review path for outputting uncertain anns'
+)
 
 
 class bcolors:
@@ -103,7 +123,7 @@ def main():
         for l in text_top[1:]:
             print(','.join(l).replace('\n', ' '), end='\t')
             start, stop = int(l[2]), int(l[3])
-            begin, end = max(start-30, 0), min(stop+30, len(text))
+            begin, end = max(start - 30, 0), min(stop + 30, len(text))
             # print with color highlight
             print(text[begin:start].replace('\n', ' '), end='')
             print(bcolors.WARNING, end='')  # red
@@ -118,7 +138,7 @@ def main():
         for l in text_bot[1:]:
             print(','.join(l).replace('\n', ' '), end='\t')
             start, stop = int(l[2]), int(l[3])
-            begin, end = max(start-30, 0), min(stop+30, len(text))
+            begin, end = max(start - 30, 0), min(stop + 30, len(text))
             # print with color highlight
             print(text[begin:start].replace('\n', ' '), end='')
             print(bcolors.FAIL, end='')  # red
