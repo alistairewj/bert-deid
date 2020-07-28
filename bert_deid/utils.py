@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import stanfordnlp
 import spacy
+from nltk import word_tokenize
 
 
 def combine_entity_types(df, lowercase=True):
@@ -737,6 +738,21 @@ def split_by_space(text):
     """
     offset = 0
     for token in text.split():
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
+        offset += len(token)
+
+def split_by_space_punctuation(text):
+    offset = 0
+    for token in re.findall(r"[\w]+|[^\s\w]", text):
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
+        offset += len(token)
+
+
+def split_by_nltk(text):
+    offset = 0
+    for token in word_tokenize(text):
         offset = text.find(token, offset)
         yield token, offset, offset + len(token)
         offset += len(token)

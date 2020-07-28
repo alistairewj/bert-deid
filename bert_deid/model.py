@@ -44,7 +44,7 @@ from transformers import (
 
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import new_tokenization as tokenization, processors
+from bert_deid import processors, tokenization
 from bert_deid.BERT_CRF import BertCRF
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
 from bert_deid.extra_feature import ModelExtraFeature
@@ -52,13 +52,13 @@ from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
-    "bert": (BertConfig, BertForTokenClassification, BertTokenizerFast),
+    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
     "roberta":
-        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
+        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
-            DistilBertTokenizerFast
+            DistilBertTokenizer
         ),
     "camembert":
         (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
@@ -67,11 +67,11 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    'bert_crf': (BertConfig, BertCRF, BertTokenizerFast),
-    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizerFast),
+    'bert_crf': (BertConfig, BertCRF, BertTokenizer),
+    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizer),
     'bert_extra_feature_crf':
-        (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
-    'biobert': (BertConfig, BertForTokenClassification, BertTokenizerFast),
+        (BertConfig, ModelExtraFeatureCRF, BertTokenizer),
+    'biobert': (BertConfig, BertForTokenClassification, BertTokenizer),
 }
 
 logger = logging.getLogger(__name__)

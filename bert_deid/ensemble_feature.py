@@ -39,9 +39,30 @@ def find_phi_location_philter(df, text):
     phi_loc = [0] * len(text)
     for i, row in df.iterrows():
         start, stop = row['start'], row['stop']
-        # # only for date:
-        # if row['entity_type'] == 'DATE':
-        #     phi_loc[start:stop] = [1] * (stop - start)
+        # only for date:
+        if row['entity_type'].upper() == 'DATE':
+            phi_loc[start:stop] = [1] * (stop - start)
+    return phi_loc
+
+def find_overlap(pydeid_loc, philter_loc):
+    phi_loc = [0] * len(pydeid_loc)
+    for i in range(len(pydeid_loc)):
+        if pydeid_loc[i] == 1 and philter_loc[i] == 1:
+            phi_loc[i] = 1
+    return phi_loc 
+
+def find_either(pydeid_loc, philter_loc):
+    phi_loc = [0] * len(pydeid_loc)
+    for i in range(len(pydeid_loc)):
+        if pydeid_loc[i] == 1 or philter_loc[i] == 1:
+            phi_loc[i] = 1
+    return phi_loc 
+
+def find_exclude(first_loc, second_loc):
+    phi_loc = [0] * len(first_loc)
+    for i in range(len(first_loc)):
+        if first_loc[i] == 1 and second_loc[i] != 1:
+            phi_loc[i] = 1
     return phi_loc
 
 
