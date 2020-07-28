@@ -23,11 +23,18 @@ import os
 import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
-# from bert_deid.pattern import create_extra_feature_vectors
-from bert_deid.ensemble_feature import find_phi_location, create_extra_feature_vector
+from bert_deid.ensemble_feature import (
+    find_phi_location,
+    create_extra_feature_vector,
+    find_phi_location_philter,
+)
 import numpy as np
+import pandas as pd
+import re
 
 logger = logging.getLogger(__name__)
+
+philter_pred = '/home/jingglin/research/philter/all/test/pred/'
 
 
 class InputFeatures(object):
@@ -113,8 +120,30 @@ def tokenize_with_labels(
         # more recent tokenizers add a special chars where a whitespace prefixed a word
         # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
         special_characters = b'\xe2\x96\x81'.decode('utf-8')
+    elif tokenizer_type in ('RobertaTokenizer'):
+        special_characters = b'\xc4\xa0'.decode('utf-8')
     else:
         raise ValueError(f'Unrecognized tokenizer {tokenizer_type}')
+
+    offset_corrections = []
+    # preprocess text for Roberta
+    if tokenizer_type == 'RobertaTokenizer':
+        # replace with appropriate apostrophe
+        # note: currently Roberta tokenizer doesn't work
+        # for apostrophe follewed by two or more spaces
+        # refer to https://github.com/huggingface/tokenizers/issues/240
+        text = text.replace("’", "'")
+
+        # replace new line and tab with a space
+        text = text.replace("\n", " ")
+        text = text.replace("\t", " ")
+
+        # remove additional space between words
+        old_text = text
+        for m in re.finditer(r'[ \t]{2,}', old_text):
+            index, length, item = m.start(), m.end(), m.group()
+            offset_corrections.append([index, length - index - 1])
+            text = text.replace(item, " ", 1)
 
     word_tokens = tokenizer.tokenize(text)
 
@@ -124,7 +153,6 @@ def tokenize_with_labels(
     else:
         correction_chars = {}
 
-    offset_corrections = []
     for char_orig, char_replaced in correction_chars.items():
         while char_orig in text:
             # make a note that we must increase offsets for subsequent tokens
@@ -200,12 +228,16 @@ def tokenize_with_labels(
     # now look back at the text and update as appropriate
     n = 0
     for token_start, token_len in offset_corrections:
-        i = bisect_left(offsets, token_start + n)
-        offsets[i + 1:] += token_len
-        lengths[i] += token_len
-        # the offsets were shifted by the text replace
-        # need to keep track of cumulative shift
-        n += token_len
+        if tokenizer_type in ('RobertaTokenizer'):
+            i = bisect_left(offsets, token_start)
+            offsets[i:] += token_len
+        else:
+            i = bisect_left(offsets, token_start + n)
+            offsets[i + 1:] += token_len
+            lengths[i] += token_len
+            # the offsets were shifted by the text replace
+            # need to keep track of cumulative shift
+            n += token_len
 
     # back to list
     offsets = offsets.tolist()
@@ -338,7 +370,12 @@ def convert_examples_to_features(
                 find_phi_location(pattern, pattern_label, example.text)
             )
 
-        assert (len(patterns) == len(ex_phi_locs))
+        # # phi found by philter
+        # # TODO: update code to find phi use original text doc
+        # document_id = example.guid
+        # path = f'{philter_pred}{document_id}.pred'
+        # df = pd.read_csv(path, index_col=0)
+        # ex_phi_locs.append(find_phi_location_philter(df, example.text))
 
         ex_tokens, ex_labels, ex_token_sw, ex_offsets, ex_lengths = tokenize_with_labels(
             tokenizer, example, pad_token_label_id=pad_token_label_id
@@ -513,10 +550,8 @@ def convert_examples_to_features(
             assert len(offsets) == max_seq_length
             assert len(lengths) == max_seq_length
             assert len(token_sw) == max_seq_length
-            if add_features:
-                assert additional_features.shape[0] == max_seq_length
-            else:
-                additional_features = None
+            if len(extra_features) > 0:
+                assert len(extra_features[0]) == max_seq_length
 
             if n_obs < 5:
                 logger.info("*** Example ***")

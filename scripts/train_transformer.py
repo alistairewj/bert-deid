@@ -47,7 +47,7 @@ from transformers import (
 )
 # custom class written for albert token classification
 from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import processors, new_tokenization as tokenization
+from bert_deid import processors, tokenization
 from bert_deid.BERT_CRF import BertCRF
 from bert_deid.extra_feature import ModelExtraFeature
 from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
@@ -92,13 +92,13 @@ ALL_MODELS = sum(
 
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
-    "bert": (BertConfig, BertForTokenClassification, BertTokenizerFast),
+    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
     "roberta":
-        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizerFast),
+        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
-            DistilBertTokenizerFast
+            DistilBertTokenizer
         ),
     "camembert":
         (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
@@ -107,10 +107,10 @@ MODEL_CLASSES = {
             XLMRobertaConfig, XLMRobertaForTokenClassification,
             XLMRobertaTokenizer
         ),
-    "bert_crf": (BertConfig, BertCRF, BertTokenizerFast),
-    "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizerFast),
+    "bert_crf": (BertConfig, BertCRF, BertTokenizer),
+    "bert_extra_feature": (BertConfig, ModelExtraFeature, BertTokenizer),
     "bert_extra_feature_crf":
-        (BertConfig, ModelExtraFeatureCRF, BertTokenizerFast),
+        (BertConfig, ModelExtraFeatureCRF, BertTokenizer),
 }
 
 
@@ -879,18 +879,18 @@ def load_and_cache_examples(
         all_extra_features
     )
 
-    # find subwords proportion:
-    total = 0
-    non_pad_tokens = 0
-    for f in features:
-        num_subwords = np.count_nonzero(np.array(f.input_subwords))
-        total += num_subwords
-        non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
-    non_pad_tokens -= 2 * len(features)
-    print('len of feature', len(features))
-    logger.info(
-        f'Number of subwords: {total} out of number of tokens {non_pad_tokens}'
-    )
+    # # find subwords proportion:
+    # total = 0
+    # non_pad_tokens = 0
+    # for f in features:
+    #     num_subwords = np.count_nonzero(np.array(f.input_subwords))
+    #     total += num_subwords
+    #     non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
+    # non_pad_tokens -= 2 * len(features)
+    # print('len of feature', len(features))
+    # logger.info(
+    #     f'Number of subwords: {total} out of number of tokens {non_pad_tokens}'
+    # )
     return dataset
 
 
@@ -1000,10 +1000,8 @@ def main():
         num_labels=args.num_labels,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
-    print('here', args.tokenizer_name)
 
     tokenizer_name = args.tokenizer_name if args.tokenizer_name else args.model_name_or_path
-    print('tokenizer name', tokenizer_name)
     tokenizer = tokenizer_class.from_pretrained(
         tokenizer_name,
         do_lower_case=args.do_lower_case,

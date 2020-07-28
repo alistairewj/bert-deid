@@ -5,10 +5,6 @@ import os
 import re
 import string
 import csv
-<<<<<<< HEAD
-from copy import deepcopy
-=======
->>>>>>> 742a723... reformat yapf with facebook style and update compute_stats function in utils.py and move pydeid feature2label under label.py
 import glob
 import argparse
 import logging
@@ -19,16 +15,15 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from sklearn.metrics import classification_report
-<<<<<<< HEAD
 
 from bert_deid import processors
 from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
 from bert_deid import utils
-=======
+s
 import json
 from bert_deid.label import PYDEID_FEATURE2LABEL
->>>>>>> 742a723... reformat yapf with facebook style and update compute_stats function in utils.py and move pydeid feature2label under label.py
-"""
+from tokenizer import get_tokens
+import string
 Runs BERT deid on a set of text files.
 Evaluates the output (matched correct PHI categories) using gold standard annotations.
 
@@ -327,6 +322,13 @@ def main():
         default=None,
         help="CSV file for result performance"
     )
+    # how to group text for evaluation
+    parser.add_argument(
+        '--tokenizer',
+        type=str,
+        default='space',
+        help='Regex pattern to split text into tokens for eval.'
+    )
 
     args = parser.parse_args()
 
@@ -357,6 +359,15 @@ def main():
         if not os.path.exists(log_path.parents[0]):
             os.makedirs(stats_path.parents[0])
 
+    if args.tokenizer == 'space':
+        tokenizer = utils.split_by_space
+    elif args.tokenizer == 'space_and_punc':
+        tokenizer = utils.split_by_space_punctuation
+    elif args.tokenizer == 'nltk':
+        tokenizer = utils.split_by_nltk
+    else:
+        raise ValueError('Invalid tokenizer name')
+
     input_ext = '.txt'
     gs_ext = args.ref_extension
     if not gs_ext.startswith('.'):
@@ -371,11 +382,6 @@ def main():
 
     # get the label to ID map from the label set
     label2id_map = label_set.label_to_id
-    print('label2id', label2id_map)
-    # only for pydeid
-    # id2label_map = {0: 'O', 1:'age', 2:'contact', 3:'date', 4:'id', 5:'location', 6:'name', 7:'profession'}
-    # label2id_map = {'O': 0, 'age':1, 'date': 3, 'email':2, 'idnum':4, 'initials':6, 'location':5,
-    # 'mrn':4, 'name':6, 'pager': 4, 'ssn': 4, 'telephone':2, 'unit':4, 'url':2 }
     if args.bio:
         new_label2id_map = {'O': 0}
         for label in label2id_map.keys():
@@ -409,11 +415,11 @@ def main():
     if args.bio:
         is_bio += 'with BIO scheme transformation on label'
 
-    if args.binary:
-        logger.info("***** Running binary evaluation {} *****".format(is_bio))
+    if args.binary_eval and not args.multi_eval:
+        logger.info("***** Running binary evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer))
     elif args.multi_eval and not args.binary_eval:
         logger.info(
-            "***** Running multi-class evaluation {} *****".format(is_bio)
+            "***** Running multi-class evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer)
         )
     else:
         raise ValueError(
@@ -526,14 +532,26 @@ def main():
         phi_tokens_true, phi_tokens_pred = [], []
         n_tokens = 0
 
-        # find phi tokens split by whitespace
-        # resolve conflicted-label token by splitting on conflict
-        for token, start, end in utils.split_by_space(text):
+        # find phi tokens split by specified tokenization scheme
+        for token, start, end in tokenizer(text):
             n_token, token_y = find_phi_tokens(token, start, end, text_tar)
-            n_tokens += n_token
-            phi_tokens_true.extend(token_y)
+
+            new_n_token = 0
+            new_token_y = []
+            # punctuation alone does not contribute to PHI tokens
+            for t in token_y:
+                if t[0] not in string.punctuation:
+                    new_n_token += 1
+                    new_token_y.append(t)
+
+            n_tokens += new_n_token
+            phi_tokens_true.extend(new_token_y)
             _, token_ypred = find_phi_tokens(token, start, end, text_pred)
-            phi_tokens_pred.extend(token_ypred)
+            new_token_ypred = []
+            for t in token_ypred:
+                if t[0] not in string.punctuation:
+                    new_token_ypred.append(t)
+            phi_tokens_pred.extend(new_token_ypred)
 
             true_label, pred_label = token_info(
                 token, start, end, text_tar, text_pred, id2label_map
@@ -616,7 +634,12 @@ def main():
                     log_text[key] += "\n"
                     if (',' in token) or ("\n" in token) or ('"' in token):
                         token = '"' + token.replace('"', '""') + '"'
-                    # label = id2label_map[label]
+
+                    if args.multi_eval:
+                        if type(label) != str:
+                            label = id2label_map[label]
+                        elif type(label) == str and label not in label2id_map.keys():
+                            label = LABEL_MAP[args.label_transform][label.upper()]
                     log_text[key] += f'{fn},,{start},{stop},{token},{label},\n'
 
         perf_all[fn] = curr_performance
@@ -638,10 +661,15 @@ def main():
     final_stats = {}
     # summary stats
     if args.binary_eval:
+        n_token_phi = sum(df['n_token_phi'])
+        n_token_tp, n_token_fp, n_token_fn = sum(df['n_token_tp']), sum(df['n_token_fp']), sum(df['n_token_fn'])
+        print (f'Number of PHI tokens: {n_token_phi}')
+        print (f'Tokens: TP:{n_token_tp}, FN:{n_token_fn}, FP:{n_token_fp}')
+
         se, ppv, f1 = utils.compute_stats(df, token_eval=True, average='macro')
-        print(f'Token Macro Se: {se.mean():0.4f}')
-        print(f'Token Macro P+: {ppv.mean():0.4f}')
-        print(f'Token Macro F1: {f1.mean():0.4f}')
+        # print(f'Token Macro Se: {se.mean():0.4f}')
+        # print(f'Token Macro P+: {ppv.mean():0.4f}')
+        # print(f'Token Macro F1: {f1.mean():0.4f}')
         final_stats['token_macro'] = [
             round(se.mean(), 4),
             round(ppv.mean(), 4),
@@ -659,11 +687,20 @@ def main():
         ]
 
     if args.multi_eval:
+        total_tp, total_fn, total_fp = 0, 0, 0
         for label in label_list:
+            total_tp += sum(df[f'n_{label}_token_tp'])
+            total_fn += sum(df[f'n_{label}_token_fn'])
+            total_fp += sum(df[f'n_{label}_token_fp'])
             se, ppv, f1 = utils.compute_stats(
                 df, token_eval=True, average='micro', label=label
             )
             print(f'Label {label}')
+            n_label_phi = sum(df[f'n_{label}_token_phi'])
+            n_label_fn = sum(df[f'n_{label}_token_fn'])
+            n_label_fp = sum(df[f'n_{label}_token_fp'])
+            print (f'Number of Label PHI {n_label_phi}')
+            print (f'FN: {n_label_fn}, FP: {n_label_fp}')
             print(f'Token Micro Se: {se.mean():0.4f}')
             print(f'Token Micro P+: {ppv.mean():0.4f}')
             print(f'Token Micro F1: {f1.mean():0.4f}')
@@ -672,6 +709,14 @@ def main():
                 round(ppv.mean(), 4),
                 round(f1.mean(), 4)
             ]
+        
+        print ("Multi Evaluation Overall")
+        se = total_tp / (total_tp + total_fn)
+        ppv = total_tp / (total_tp + total_fp)
+        f1 = 2 * se * ppv / (se + ppv)
+        print (f'Token Micro Se: {se:0.4f}')
+        print (f'Token Micro P+: {ppv:0.4f}')
+        print (f'Token Micro F1: {f1:0.4f}')
 
     if stats_path is not None:
         final_stats = pd.DataFrame.from_dict(
@@ -680,16 +725,21 @@ def main():
         final_stats.to_csv(stats_path)
 
     if args.bio:
+        if args.binary_eval: 
+            n_entity_phi = sum(df['n_entity_phi'])
+            n_entity_tp, n_entity_fp, n_entity_fn = sum(df['n_entity_tp']), sum(df['n_entity_fp']), sum(df['n_entity_fn'])
+            print (f'Number of PHI Entity: {n_entity_phi}')
+            print (f'Entity: TP:{n_entity_tp}, FN:{n_entity_fn}, FP:{n_entity_fp}')
         # also perform entity evaluation
         se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='macro')
-        print(f'Entity Macro Se: {se.mean():0.4f}')
-        print(f'Entity Macro P+: {ppv.mean():0.4f}')
-        print(f'Entity Macro F1: {f1.mean():0.4f}')
+        # print(f'Entity Macro Se: {se.mean():0.4f}')
+        # print(f'Entity Macro P+: {ppv.mean():0.4f}')
+        # print(f'Entity Macro F1: {f1.mean():0.4f}')
 
         se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='micro')
-        print(f'Entity Micro Se: {se.mean():0.4f}')
-        print(f'Entity Micro P+: {ppv.mean():0.4f}')
-        print(f'Entity Micro F1: {f1.mean():0.4f}')
+        # print(f'Entity Micro Se: {se.mean():0.4f}')
+        # print(f'Entity Micro P+: {ppv.mean():0.4f}')
+        # print(f'Entity Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file
