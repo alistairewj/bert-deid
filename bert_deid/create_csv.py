@@ -15,9 +15,6 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-from bert_deid.tokenization import BertTokenizerNER
-from bert_deid.utils import create_hamonize_label_dict
-
 
 def argparser(args):
     parser = argparse.ArgumentParser(description='Convert i2b2 annotations')

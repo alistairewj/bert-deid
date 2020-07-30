@@ -1,7 +1,7 @@
 from torch import nn
 import torch
 import numpy as np
-from bert_deid.crf import CRF
+from bert_deid.model.crf import CRF
 from transformers import BertModel, BertPreTrainedModel
 
 
@@ -18,7 +18,6 @@ class ModelExtraFeatureCRF(BertPreTrainedModel):
 
         self.hidden2label = nn.Linear(self.hidden_size + 1, self.num_labels)
         self.crf = CRF(num_tags=self.num_labels, batch_first=True)
-        # self.classifier = nn.Linear(self.hidden_size + 1, self.num_labels)
 
         # self.init_weights()
 

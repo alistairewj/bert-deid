@@ -334,12 +334,12 @@ class LabelCollection(object):
     def transform_label(self, label: Label):
         """Return the transformed version of an input label."""
         # creates a function to transform labels
-        if self.transform is not None:
-            label = label.map_entity_type(LABEL_MAP[self.transform])
+        if label.entity_type[:2] not in ("B-", "I-"):
+            if self.transform is not None:
+                label = label.map_entity_type(LABEL_MAP[self.transform])
 
-        if self.bio:
-            # convert label to BIO format
-            if label.entity_type[:2] not in ("B-", "I-"):
+            if self.bio:
+                # convert label to BIO format
                 label = self.split_to_bio(label)
 
         return label
@@ -378,13 +378,13 @@ class LabelCollection(object):
         Modifies self.labels to use transformed entity types.
         """
         # creates a function to transform labels
-        if self.transform is not None:
-            for label in self.labels:
-                label.map_entity_type(LABEL_MAP[self.transform])
+        if self.labels[0].entity_type[:2] not in ("B-", "I-"):
+            if self.transform is not None:
+                for label in self.labels:
+                    label.map_entity_type(LABEL_MAP[self.transform])
 
-        if self.bio:
-            # convert labels to BIO format
-            if self.labels[0].entity_type[:2] not in ("B-", "I-"):
+            if self.bio:
+                # convert labels to BIO format
                 self.labels_to_bio()
 
     def labels_to_bio(self):

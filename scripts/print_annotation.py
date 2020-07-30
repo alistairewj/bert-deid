@@ -17,10 +17,11 @@ Evaluates the output using gold standard annotations.
 Optionally outputs mismatches to brat standoff format.
 """
 
-
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 
@@ -39,45 +40,64 @@ def main():
     parser = argparse.ArgumentParser()
 
     # file to run
-    parser.add_argument('-t', "--text",
-                        default=None,
-                        required=True,
-                        type=str,
-                        help=("Text file to assess."))
+    parser.add_argument(
+        '-t',
+        "--text",
+        default=None,
+        required=True,
+        type=str,
+        help=("Text file to assess.")
+    )
 
     # gold standard params
-    parser.add_argument('-r', "--ref",
-                        default=None,
-                        type=str,
-                        help=("The input reference file."))
+    parser.add_argument(
+        '-r',
+        "--ref",
+        default=None,
+        type=str,
+        help=("The input reference file.")
+    )
 
-    parser.add_argument('-p', "--pred",
-                        default=None,
-                        type=str,
-                        help="Optionally compare to a model.")
+    parser.add_argument(
+        '-p',
+        "--pred",
+        default=None,
+        type=str,
+        help="Optionally compare to a model."
+    )
 
-    parser.add_argument('-b', '--brat_path', type=str,
-                        default=None,
-                        help='folder to output brat annotations')
+    parser.add_argument(
+        '-b',
+        '--brat_path',
+        type=str,
+        default=None,
+        help='folder to output brat annotations'
+    )
 
     args = parser.parse_args()
 
+    for fn in [args.text, args.pred, args.ref]:
+        if not os.path.exists(fn):
+            raise ValueError(f'{fn} is not a valid file.')
+
     fn = args.text
+    fn_pred = args.pred
+    fn_gs = args.ref
+
     # load the text
     with open(fn, 'r') as fp:
         text = ''.join(fp.readlines())
 
     # load output of bert-deid
-    fn_pred = args.pred
-    df = pd.read_csv(fn_pred, header=0,
-                     dtype={'entity': str,
-                            'entity_type': str})
+    df = pd.read_csv(
+        fn_pred, header=0, dtype={
+            'entity': str,
+            'entity_type': str
+        }
+    )
 
     # load ground truth
-    fn_gs = args.ref
-    gs = pd.read_csv(fn_gs, header=0,
-                     dtype={'entity': str,
-                            'entity_type': str})
+    gs = pd.read_csv(fn_gs, header=0, dtype={'entity': str, 'entity_type': str})
 
     # binary vector indicating PHI/not phi
     text_tar = np.zeros(len(text), dtype=bool)
@@ -96,7 +116,9 @@ def main():
     i = 0
     # inform the user of the legend
     print('\n')
-    print(f'{bcolors.OKGREEN}TRUE POSITIVE.{bcolors.ENDC} If no predictions given, PHI will be annotated in this color.')
+    print(
+        f'{bcolors.OKGREEN}TRUE POSITIVE.{bcolors.ENDC} If no predictions given, PHI will be annotated in this color.'
+    )
     print(f'{bcolors.FAIL}FALSE NEGATIVE.{bcolors.ENDC}')
     print(f'{bcolors.OKBLUE}FALSE POSITIVE.{bcolors.ENDC}\n')
     color = 'black'

@@ -1,0 +1,24 @@
+This project contains a model for free-text deidentification of clinical text using Bidrectional Encoder Representations from Transformers (BERT).
+BERT is a neural network model which is pre-trained on a large text corpus, and has shown excellent performance in a number of natural language processing tasks.
+You can read more about BERT online [1].
+
+This project contains two sub-folders:
+
+- bert-deid - A python package containing code to apply the BERT model to free-text
+- bert-i2b2-2014 - Binary and text files which constitute the model
+
+If you would like to use this package, you can do so as follows:
+
+- Install the bert-deid package by changing into the directory and running an install: `pip install .`
+- Export an environment variable which points to the model: `export MODEL_DIR='/path/to/the/model/bert-i2b2-2014'`
+- Call the command line interface: `bert_deid apply --text "hello this is dr. somayah"`
+
+You can get more information about the command line interface with the help: `bert_deid -h`.
+
+For detail on the training and evaluation of the model, see our paper at the ACM Conference for Health, Learning and Inference (ACM-CHIL) [2].
+https://doi.org/10.1145/3368555.3384455
+
+This project is also source code controlled on GitHub: https://github.com/alistairewj/bert-deid/
+
+[1] Devlin J, Chang MW, Lee K, Toutanova K. Bert: Pre-training of deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805. 2018 Oct 11.
+[2] Johnson AE, Bulgarelli L, Pollard TJ. Deidentification of free-text medical records using pre-trained bidirectional transformers. InProceedings of the ACM Conference on Health, Inference, and Learning 2020 Apr 2 (pp. 214-221).

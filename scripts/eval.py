@@ -1,24 +1,26 @@
-from bert_deid import utils
-import pandas as pd
-import numpy as np
+from collections import OrderedDict
+import json
+
+import os
 import re
 import string
 import csv
+from copy import deepcopy
 import glob
 import argparse
 import logging
 from pathlib import Path
-import os
-import re
+
+import pandas as pd
+import numpy as np
 from tqdm import tqdm
-from collections import OrderedDict
+import torch
+from sklearn.metrics import classification_report
 
 from bert_deid import processors
-from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection, LABEL_MAP
-from sklearn.metrics import classification_report
-import json
+from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
+from bert_deid import utils
 from bert_deid.label import PYDEID_FEATURE2LABEL
-from tokenizer import get_tokens
 import string
 """
 Runs BERT deid on a set of text files.
@@ -33,6 +35,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
 
 def find_phi_tokens(token_text, start, end, all_labels):
     """
@@ -168,48 +171,51 @@ def token_type_eval(
                         ] = count_freq(fn_list, idval)
 
 
-def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
-    sort_by_start = anno.sort_values("start")
-    # find starting row index for each PHI predicted
+def merge_BIO_pred(label_set, document_id, is_binary, is_expand, text, label2id_map):
     entity_starts = []
-    for i, row in sort_by_start.iterrows():
-        if row["entity_type"][0].lower() == "b":
+    for i, label in enumerate(label_set):
+        if label.entity_type[0].upper() == "B":
             entity_starts.append(i)
-    # create a new dataframe merging BIO annotations to original ann
-    new_anno = pd.DataFrame(columns=sort_by_start.columns)
+    
+    # create a new dataframe merging BIO annotations
+    anno = pd.DataFrame(columns=["document_id", "annotation_id", "start", "stop", "entity", "entity_type", "comment"])
     for i in range(len(entity_starts)):
         current_start_index = entity_starts[i]
+
         if i == len(entity_starts) - 1:
-            next_start_index = len(sort_by_start)
+            next_start_index = len(label_set)
         else:
-            next_start_index = entity_starts[i + 1]
+            next_start_index = entity_starts[i+1]
+
         if is_binary:
-            entity_type = 'phi'
+            entity_type = 'PHI'
         else:
-            entity_type = sort_by_start["entity_type"].iloc[current_start_index
-                                                           ].split("-")[1]
-        start = sort_by_start["start"].iloc[current_start_index]
-        stop = sort_by_start["stop"].iloc[next_start_index - 1]
+            entity_type = label_set[current_start_index].entity_type.split("-")[1]
+        
+        start = label_set[current_start_index].start
+        stop = label_set[next_start_index - 1].start + label_set[next_start_index - 1].length
         entity = ""
         if is_expand:
             entity += text[start:stop]
         else:
             for j in range(current_start_index, next_start_index - 1):
-                entity += str(sort_by_start["entity"].iloc[j])
+                print ('entity', label_set[j].entity)
+                entity += str(label_set[j].entity)
+
                 # This handles entity evaluation where BERT misses
                 # middle of entity but predict start and end correct
                 # in such case, token evaluation is worse than entity evaluation
                 # if only cares about correctly predict START, STOP, ENTITY TYPE.
 
                 for _ in range(
-                    sort_by_start["stop"].iloc[j],
-                    sort_by_start["start"].iloc[j + 1]
+                    label_set[j].start + label_set[j].length,
+                    label_set[j+1].start
                 ):
                     entity += " "
-            entity += str(sort_by_start["entity"].iloc[next_start_index - 1])
-        new_anno = new_anno.append(
+            entity += str(label_set[next_start_index-1].entity)
+        anno = anno.append(
             {
-                "document_id": sort_by_start["document_id"].iloc[0],
+                "document_id": document_id,
                 "annotation_id": "",
                 "start": start,
                 "stop": stop,
@@ -220,11 +226,18 @@ def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
             ignore_index=True
         )
 
-    return new_anno
+    return anno
 
 
 def main():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--model_dir",
+        required=True,
+        type=str,
+        help="Path to the model (used to define label set).",
+    )
 
     parser.add_argument(
         "--pred_path",
@@ -259,15 +272,15 @@ def main():
     )
 
     parser.add_argument(
-        "--binary_eval",
+        "--binary",
         action="store_true",
-        help="Do binary evaluation, phi instances or not"
+        help="Do binary evaluation (PHI or not)"
     )
 
     parser.add_argument(
-        "--multi_eval",
+        "--multi",
         action="store_true",
-        help="Multi NER evaluation, correct phi instances or not"
+        help="Do multi evaluation"
     )
 
     parser.add_argument(
@@ -278,33 +291,23 @@ def main():
             as phi instance"
     )
 
-    parser.add_argument(
-        "--data_type",
-        default=None,
-        type=str,
-        required=True,
-        choices=LABEL_SETS,
-        help="The input dataset type. Valid choices: {}.".format(
-            ', '.join(LABEL_SETS)
-        ),
-    )
+    # parser.add_argument(
+    #     "--data_type",
+    #     default=None,
+    #     type=str,
+    #     required=True,
+    #     choices=LABEL_SETS,
+    #     help="The input dataset type. Valid choices: {}.".format(
+    #         ', '.join(LABEL_SETS)
+    #     ),
+    # )
 
-    # label transformations
-    parser.add_argument(
-        "--bio",
-        action='store_true',
-        help="Whether to transform labels to use inside-outside-beginning tags"
-    )
-    _LABEL_TRANSFORMS = list(LABEL_MEMBERSHIP.keys())
-    parser.add_argument(
-        "--label_transform",
-        default=None,
-        choices=_LABEL_TRANSFORMS,
-        help=(
-            "Map labels using pre-coded transforms: "
-            f"{', '.join(_LABEL_TRANSFORMS)}"
-        )
-    )
+    # # label transformations
+    # parser.add_argument(
+    #     "--bio",
+    #     action='store_true',
+    #     help="Whether to transform labels to use inside-outside-beginning tags"
+    # )
 
     parser.add_argument(
         "--log",
@@ -334,6 +337,9 @@ def main():
     )
 
     args = parser.parse_args()
+    training_args = torch.load(
+        os.path.join(args.model_dir, 'training_args.bin')
+    )
 
     ref_path = Path(args.ref_path)
     pred_path = Path(args.pred_path)
@@ -379,24 +385,15 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    label_set = LabelCollection(
-        data_type=args.data_type, bio=args.bio, transform=args.label_transform
-    )
+    label_set = torch.load(os.path.join(args.model_dir, 'label_set.bin'))
 
     # get the label to ID map from the label set
-    label2id_map = label_set.label_to_id
-    if args.bio:
-        new_label2id_map = {'O': 0}
-        for label in label2id_map.keys():
-            if label != 'O':
-                new_label = label[2:]
-                if new_label not in new_label2id_map:
-                    new_label2id_map[new_label] = len(new_label2id_map)
-        label2id_map = new_label2id_map
-    if args.binary_eval:
-        label2id_map = {'O': 0, 'phi': 1}
-    id2label_map = {label2id_map[key]: key for key in label2id_map}
+    if args.binary:
+        label2id_map = {'O': 0, 'PHI': 1}
+    else:
+        label2id_map = label_set.label_to_id
 
+    id2label_map = {label2id_map[key]: key for key in label2id_map}
     label_list = list(label2id_map.keys())
     label_list.remove('O')
 
@@ -415,12 +412,12 @@ def main():
         raise ValueError('Input folder %s does not exist.', args.text_path)
 
     is_bio = ''
-    if args.bio:
+    if training_args.bio:
         is_bio += 'with BIO scheme transformation on label'
 
-    if args.binary_eval and not args.multi_eval:
+    if args.binary and not args.multi:
         logger.info("***** Running binary evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer))
-    elif args.multi_eval and not args.binary_eval:
+    elif args.multi and not args.binary:
         logger.info(
             "***** Running multi-class evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer)
         )
@@ -431,11 +428,16 @@ def main():
 
     logger.info(" Num examples = %d", len(input_files))
 
+    # we will load predictions/ground truth into LabelSet objects
+    # the object handles label transformation, etc.
+    pred_label_set = deepcopy(label_set)
+    gs_label_set = deepcopy(label_set)
+
     fn_all, fp_all = [], []
     perf_all = {}
     total_eval = 0
     true_labels, pred_labels = [], []
-    if args.bio:
+    if training_args.bio:
         fn_all_entity, fp_all_entity = [], []
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
@@ -444,72 +446,31 @@ def main():
 
         # load output of bert-deid
         fn_pred = pred_path / f'{fn}{pred_ext}'
-        df = pd.read_csv(
-            fn_pred,
-            header=0,
-            delimiter=",",
-            dtype={
-                'entity': str,
-                'entity_type': str
-            }
-        )
+        pred_label_set.from_csv(fn_pred)
+
         # load ground truth
         gs_fn = ref_path / f'{fn}{gs_ext}'
-        gs = pd.read_csv(
-            gs_fn,
-            header=0,
-            delimiter=",",
-            dtype={
-                'entity': str,
-                'entity_type': str
-            }
-        )
+        gs_label_set.from_csv(gs_fn)
 
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
-        for i, row in gs.iterrows():
-            if args.binary_eval:
-                text_tar[row['start']:row['stop']] = 1
+        for i, label in enumerate(gs_label_set.labels):
+            start, stop = label.start, label.start + label.length
+            entity_type = label.entity_type
+
+            if args.binary:
+                text_tar[start:stop] = 1
             else:
-                if args.label_transform is not None:
-                    transformed_label = LABEL_MAP[args.label_transform][
-                        row['entity_type'].upper()]
-                    text_tar[row['start']:row['stop']] = label2id_map[
-                        transformed_label]
-                else:
-                    text_tar[row['start']:row['stop']] = label2id_map[
-                        row['entity_type']]
+                text_tar[start:stop] = gs_label_set.label_to_id[entity_type]
+
         text_pred = np.zeros(len(text), dtype=int)
-        for i, row in df.iterrows():
-            if args.bio:
-                if (
-                    'B-' not in row['entity_type'] and
-                    'I-' not in row['entity_type']
-                ) and row['entity_type'].lower() != 'phi':
-                    entity_type = row['entity_type']
-                if (
-                    'B-' in row['entity_type'].upper() or
-                    'I-' in row['entity_type'].upper()
-                ):
-                    entity_type = row['entity_type'][
-                        2:]  # remove b- or i-, don't care for char eval
+        for i, label in enumerate(pred_label_set.labels):
+            start, stop = label.start, label.start + label.length
+            entity_type = label.entity_type
+            if args.binary:
+                text_pred[start:stop] = 1
             else:
-                if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
-                    entity_type = row['entity_type'][2:]
-                else:
-                    entity_type = row['entity_type']
-            if args.binary_eval:
-                text_pred[row['start']:row['stop']] = 1
-            else:
-                try:
-                    text_pred[row['start']:row['stop']] = label2id_map[
-                        entity_type.upper()]
-                except KeyError:
-                    # transform pydeid feature to correponding label
-                    transformed_label = PYDEID_FEATURE2LABEL[entity_type.lower()
-                                                            ]
-                    text_pred[row['start']:row['stop']] = label2id_map[
-                        transformed_label]
+                text_pred[start:stop] = label2id_map[entity_type]
 
         curr_performance = {}
         curr_performance['n_char'] = len(text)
@@ -565,7 +526,7 @@ def main():
         curr_performance['n_token_tp'] = len(tp_list)
         curr_performance['n_token_fp'] = len(fp_list)
         curr_performance['n_token_fn'] = len(fn_list)
-        if args.multi_eval:
+        if args.multi:
             token_type_eval(
                 phi_tokens_true, tp_list, fp_list, fn_list, id2label_map,
                 curr_performance
@@ -573,13 +534,12 @@ def main():
 
         fp_list_entity, fn_list_entity = None, None
         # report performance entity-wise (only when label is transformed)
-        if args.bio:
-            df = merge_BIO_pred(
-                df, args.binary_eval, args.expand_eval, text, label2id_map
-            )
-            if args.binary_eval:
-                gs['entity_type'] = 'phi'
-                df['entity_type'] = 'phi'
+        if training_args.bio:
+            df = merge_BIO_pred(pred_label_set.labels, fn, args.binary, args.expand_eval, text, label2id_map)
+            gs = merge_BIO_pred(gs_label_set.labels, fn, args.binary, args.expand_eval, text, label2id_map)
+            if args.binary:
+                gs['entity_type'] = 'PHI'
+                df['entity_type'] = 'PHI'
             # ignore punctuation punshiment at front/end
             true = utils.ignore_partials(utils.get_entities(gs))
             pred = utils.ignore_partials(utils.get_entities(df))
@@ -599,7 +559,7 @@ def main():
         if (log_path is not None) & (
             (curr_performance['n_token_fp'] > 0) |
             (curr_performance['n_token_fn'] > 0) | (
-                args.bio &
+                training_args.bio &
                 (fn_list_entity is not None or fp_list_entity is not None)
             )
         ):
@@ -609,9 +569,9 @@ def main():
                     false_list = fp_list
                 elif key == 'False Negatives Token':
                     false_list = fn_list
-                elif key == 'False Positives Entity' and args.bio:
+                elif key == 'False Positives Entity' and training_args.bio:
                     false_list = fp_list_entity
-                elif key == 'False Negatives Entity' and args.bio:
+                elif key == 'False Negatives Entity' and training_args.bio:
                     false_list = fn_list_entity
                 else:
                     false_list = []
@@ -630,11 +590,11 @@ def main():
                     if (',' in token) or ("\n" in token) or ('"' in token):
                         token = '"' + token.replace('"', '""') + '"'
 
-                    if args.multi_eval:
-                        if type(label) != str:
-                            label = id2label_map[label]
-                        elif type(label) == str and label not in label2id_map.keys():
-                            label = LABEL_MAP[args.label_transform][label.upper()]
+                    # if args.multi:
+                    #     if type(label) != str:
+                    #         label = id2label_map[label]
+                    #     elif type(label) == str and label not in label2id_map.keys():
+                    #         label = LABEL_MAP[training_args.label_transform][label.upper()]
                     log_text[key] += f'{fn},,{start},{stop},{token},{label},\n'
 
         perf_all[fn] = curr_performance
@@ -655,7 +615,7 @@ def main():
 
     final_stats = {}
     # summary stats
-    if args.binary_eval:
+    if args.binary:
         n_token_phi = sum(df['n_token_phi'])
         n_token_tp, n_token_fp, n_token_fn = sum(df['n_token_tp']), sum(df['n_token_fp']), sum(df['n_token_fn'])
         print (f'Number of PHI tokens: {n_token_phi}')
@@ -681,7 +641,7 @@ def main():
             round(f1.mean(), 4)
         ]
 
-    if args.multi_eval:
+    if args.multi:
         total_tp, total_fn, total_fp = 0, 0, 0
         for label in label_list:
             total_tp += sum(df[f'n_{label}_token_tp'])
@@ -719,8 +679,8 @@ def main():
         )
         final_stats.to_csv(stats_path)
 
-    if args.bio:
-        if args.binary_eval: 
+    if training_args.bio:
+        if args.binary: 
             n_entity_phi = sum(df['n_entity_phi'])
             n_entity_tp, n_entity_fp, n_entity_fn = sum(df['n_entity_tp']), sum(df['n_entity_fp']), sum(df['n_entity_fn'])
             print (f'Number of PHI Entity: {n_entity_phi}')
@@ -732,9 +692,9 @@ def main():
         # print(f'Entity Macro F1: {f1.mean():0.4f}')
 
         se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='micro')
-        # print(f'Entity Micro Se: {se.mean():0.4f}')
-        # print(f'Entity Micro P+: {ppv.mean():0.4f}')
-        # print(f'Entity Micro F1: {f1.mean():0.4f}')
+        print(f'Entity Micro Se: {se.mean():0.4f}')
+        print(f'Entity Micro P+: {ppv.mean():0.4f}')
+        print(f'Entity Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file

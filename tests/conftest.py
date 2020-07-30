@@ -2,11 +2,13 @@
 # Fixtures are a good way to
 #  - load and share data across tests
 #  - inject dependencies into tests
+# We use environment variables in fixtures.
+# If not present, we use default values.
 import json
 import os
 
 import pytest
-from bert_deid import model as bert_deid_model
+from bert_deid.model import Transformer
 
 
 @pytest.fixture(scope="session")
@@ -19,9 +21,7 @@ def config_radiology_reports():
 
     # load the config json into a dictionary
     config_fn = os.path.join(
-        dir_path,
-        'fake-data',
-        'config-radiology-reports.json'
+        dir_path, 'fake-data', 'config-radiology-reports.json'
     )
 
     # if config provided, update dict with values from config
@@ -59,6 +59,14 @@ def bert_i2b2_2014_model():
     """
     Load the model.
     """
-    return bert_deid_model.BertForDEID(
-        model_dir="tests/models/i2b2_2014/"
+    model_type = 'bert'  # -base-uncased'
+
+    model_path = os.getenv('MODEL_PATH')
+    if model_path is None:
+        # use default
+        model_path = '/data/models/bert-i2b2-2014'
+
+    transformer = Transformer(
+        model_type, model_path, max_seq_length=128, device='cpu'
     )
+    return transformer

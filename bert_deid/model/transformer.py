@@ -43,11 +43,11 @@ from transformers import (
 )
 
 # custom class written for albert token classification
-from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import processors, tokenization
-from bert_deid.BERT_CRF import BertCRF
+from bert_deid import tokenization, processors
 from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
-from bert_deid.extra_feature import ModelExtraFeature
+from bert_deid.model.albert import AlbertForTokenClassification
+from bert_deid.model.crf import BertCRF
+from bert_deid.model.extra_feature import ModelExtraFeature
 from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 
 MODEL_CLASSES = {
@@ -103,13 +103,9 @@ class Transformer(object):
     """Wrapper for a Transformer model to be applied for NER."""
     def __init__(
         self,
-        model_type,
         model_path,
-        # token_step_size=100,
-        # sequence_length=100,
-        max_seq_length=128,
         device='cpu',
-        patterns=[],
+        patterns=None,
     ):
         self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
         self.num_labels = len(self.label_set.label_list)
@@ -120,12 +116,16 @@ class Transformer(object):
         # sequence_length is how long each example for the model is
         # self.sequence_length = sequence_length
 
+        # get the definition classes for the model
+        training_args = torch.load(
+            os.path.join(model_path, 'training_args.bin')
+        )
+        self.model_type = training_args.model_type
+
         # max seq length is what we pad the model to
         # max seq length should always be >= sequence_length + 2
-        self.max_seq_length = max_seq_length
+        self.max_seq_length = training_args.max_seq_length
 
-        # get the definition classes for the model
-        self.model_type = model_type.lower()
         config_class, model_class, tokenizer_class = MODEL_CLASSES[
             self.model_type]
 
@@ -136,7 +136,7 @@ class Transformer(object):
         self.config = config_class.from_pretrained(model_path)
         self.tokenizer = tokenizer_class.from_pretrained(model_path)
         model_param = {'pretrained_model_name_or_path': model_path}
-        if model_type == 'bert_extra_feature' or model_type == 'bert_extra_feature_crf':
+        if self.model_type == 'bert_extra_feature' or self.model_type == 'bert_extra_feature_crf':
             model_param['num_features'] = len(self.patterns)
         self.model = model_class.from_pretrained(**model_param)
 
@@ -192,7 +192,7 @@ class Transformer(object):
         return examples
 
     def predict(
-        self, text, document_id, num_subwords, num_tokens, batch_size=8
+        self, text, document_id, batch_size=8
     ):
         # args, model, tokenizer, processor, pad_token_label_id, mode="test"
         # sets the model to evaluation mode to fix parameters
@@ -210,13 +210,8 @@ class Transformer(object):
 
         # in this case we have a length 1 example
         # we use the SHA-256 hash of the text as the globally unique identifier
-        # guid = sha256(text.encode()).hexdigest()
         guid = document_id
-        examples = [
-            processors.InputExample(
-                guid=guid, text=text, labels=None, patterns=self.patterns
-            )
-        ]
+        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
         features = tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
@@ -250,35 +245,29 @@ class Transformer(object):
         all_label_ids = torch.tensor(
             [f.label_ids for f in features], dtype=torch.long
         )
-        all_extra_features = torch.tensor(
-            [f.extra_feature for f in features], dtype=torch.long
-        )
 
-        # find subwords proportion:
-        total = 0
-        non_pad_tokens = 0
-        for f in features:
-            total += np.count_nonzero(np.array(f.input_subwords))
-            non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
-        non_pad_tokens -= 2 * len(features)
-        num_subwords += total
-        num_tokens += non_pad_tokens
-        # print (f'Prediction: Number of subwords: {total} out of number of tokens {non_pad_tokens}')
+        if hasattr(features[0], 'additional_features'):
+            all_additional_features = torch.tensor(
+                [f.additional_features for f in features], dtype=torch.long
+            )
 
-        eval_dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
-            all_extra_features
-        )
-        eval_sampler = SequentialSampler(eval_dataset)
-        eval_dataloader = DataLoader(
-            eval_dataset, sampler=eval_sampler, batch_size=batch_size
-        )
+            dataset = TensorDataset(
+                all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+                all_additional_features
+            )
+        else:
+            dataset = TensorDataset(
+                all_input_ids, all_input_mask, all_segment_ids, all_label_ids
+            )
+
+        sampler = SequentialSampler(dataset)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=batch_size)
 
         logits = None
         out_label_ids = None
         mask = None
 
-        for batch in eval_dataloader:
+        for batch in dataloader:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
@@ -296,8 +285,6 @@ class Transformer(object):
                     inputs['extra_features'] = batch[4]
                 outputs = self.model(**inputs)
                 _, batch_logits = outputs[:2]
-
-                # eval_loss += tmp_eval_loss.item()
 
             # extract output predictions (logits) as a numpy array
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
@@ -364,4 +351,35 @@ class Transformer(object):
         lengths = [x for i, x in enumerate(lengths) if i in unique_idx]
         preds = preds[unique_idx, :]
 
-        return preds, lengths, offsets, num_subwords, num_tokens
+        return preds, lengths, offsets
+
+    def apply(self, text, repl='___'):
+        preds, lengths, offsets = self.predict(text)
+
+        # get the free-text label
+        labels = [
+            self.label_set.id_to_label[idxMax]
+            for idxMax in preds.argmax(axis=1)
+        ]
+
+        # merge entities which are adjacent
+        #removed_entities = np.zeros(len(labels), dtype=bool)
+        for i in reversed(range(len(labels))):
+            if i == 0 or labels[i] == 'O':
+                continue
+
+            if labels[i] == labels[i - 1]:
+                offset, length = offsets.pop(i), lengths.pop(i)
+                lengths[i - 1] = offset + length - offsets[i - 1]
+                labels.pop(i)
+
+        #keep_entities = ~removed_entities
+        #labels = [l for i, l in enumerate(labels) if keep_entities[i]]
+        #lengths = lengths[keep_entities]
+        #offsets = offsets[keep_entities]
+        for i in reversed(range(len(labels))):
+            if labels[i] != 'O':
+                # replace this instance of text with three underscores
+                text = text[:offsets[i]] + repl + text[offsets[i] + lengths[i]:]
+
+        return text
