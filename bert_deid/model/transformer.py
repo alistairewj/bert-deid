@@ -135,7 +135,7 @@ class Transformer(object):
         model_param = {'pretrained_model_name_or_path': new_model_path}
         if self.model_type == 'bert_extra_feature':
             model_param['num_features'] = len(self.patterns)
-        self.model = model_class.from_pretrained(**model_param)
+        self.model = model_class.from_pretrained(**model_param, num_labels=self.num_labels)
 
         if self.model_type == 'bert_crf':
             self.model = BertCRF(
