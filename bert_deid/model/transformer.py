@@ -7,7 +7,6 @@ from hashlib import sha256
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from seqeval.metrics import f1_score, precision_score, recall_score
 
 import torch
 from torch.nn import CrossEntropyLoss
@@ -53,8 +52,7 @@ from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
 MODEL_CLASSES = {
     "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
     "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
-    "roberta":
-        (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
+    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
     "distilbert":
         (
             DistilBertConfig, DistilBertForTokenClassification,
@@ -69,8 +67,7 @@ MODEL_CLASSES = {
         ),
     'bert_crf': (BertConfig, BertCRF, BertTokenizer),
     'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizer),
-    'bert_extra_feature_crf':
-        (BertConfig, ModelExtraFeatureCRF, BertTokenizer),
+    'bert_extra_feature_crf': (BertConfig, ModelExtraFeatureCRF, BertTokenizer),
     'biobert': (BertConfig, BertForTokenClassification, BertTokenizer),
 }
 
@@ -194,9 +191,7 @@ class Transformer(object):
 
         return examples
 
-    def predict(
-        self, text, document_id, num_subwords, num_tokens, batch_size=8
-    ):
+    def predict(self, text, document_id, batch_size=8):
         # args, model, tokenizer, processor, pad_token_label_id, mode="test"
         # sets the model to evaluation mode to fix parameters
         self.model.eval()
