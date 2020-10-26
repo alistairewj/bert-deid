@@ -24,12 +24,13 @@ import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
 import numpy as np
-import pandas as pd 
+import pandas as pd
 import re
 
 logger = logging.getLogger(__name__)
 
 philter_pred = '/home/jingglin/research/philter/all/test/pred/'
+
 
 class InputFeatures(object):
     """Features are directly input to the transformer model."""
@@ -114,9 +115,7 @@ def tokenize_with_labels(
         # more recent tokenizers add a special chars where a whitespace prefixed a word
         # e.g. big tokenizer -> ['_big', '_to', 'ken', 'izer] where '_' == \xe2\x96\x81
         special_characters = b'\xe2\x96\x81'.decode('utf-8')
-    elif tokenizer_type in (
-        'RobertaTokenizer'
-    ):
+    elif tokenizer_type in ('RobertaTokenizer'):
         special_characters = b'\xc4\xa0'.decode('utf-8')
     else:
         raise ValueError(f'Unrecognized tokenizer {tokenizer_type}')
@@ -125,7 +124,7 @@ def tokenize_with_labels(
     # preprocess text for Roberta
     if tokenizer_type == 'RobertaTokenizer':
         # replace with appropriate apostrophe
-        # note: currently Roberta tokenizer doesn't work 
+        # note: currently Roberta tokenizer doesn't work
         # for apostrophe follewed by two or more spaces
         # refer to https://github.com/huggingface/tokenizers/issues/240
         text = text.replace("’", "'")
@@ -138,9 +137,8 @@ def tokenize_with_labels(
         old_text = text
         for m in re.finditer(r'[ \t]{2,}', old_text):
             index, length, item = m.start(), m.end(), m.group()
-            offset_corrections.append([index, length-index - 1])
+            offset_corrections.append([index, length - index - 1])
             text = text.replace(item, " ", 1)
-
 
     word_tokens = tokenizer.tokenize(text)
 
@@ -227,7 +225,7 @@ def tokenize_with_labels(
     for token_start, token_len in offset_corrections:
         if tokenizer_type in ('RobertaTokenizer'):
             i = bisect_left(offsets, token_start)
-            offsets[i:] += token_len 
+            offsets[i:] += token_len
         else:
             i = bisect_left(offsets, token_start + n)
             offsets[i + 1:] += token_len
