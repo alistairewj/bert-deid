@@ -238,7 +238,6 @@ class LabelCollection(object):
                 )
             )
         self.label_list = list(self.define_label_set(data_type))
-        self.labels = self.label_list
 
         # update our label list using the transform
         # if self.transform is not None:
@@ -271,6 +270,7 @@ class LabelCollection(object):
 
         # now make label_list immutable
         self.label_list = tuple(self.label_list)
+        self.labels = self.label_list
 
         # map labels to IDs
         self.label_to_id = {label: i for i, label in enumerate(self.label_list)}
