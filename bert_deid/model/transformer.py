@@ -210,12 +210,8 @@ class Transformer(object):
         # we use the SHA-256 hash of the text as the globally unique identifier
         # guid = sha256(text.encode()).hexdigest()
         guid = document_id
-        examples = [
-            processors.InputExample(
-                guid=guid, text=text, labels=None, patterns=self.patterns
-            )
-        ]
-        features = tokenization.convert_examples_to_features(
+        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
+        features = self.tokenizer.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
             self.max_seq_length,

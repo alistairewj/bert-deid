@@ -227,7 +227,6 @@ class LabelCollection(object):
             'binary' - one label category: 'PHI' (non-PHI will become 'O')
     """
     def __init__(self, data_type, bio=None, transform=None):
-        self.labels = None
         self.bio = bio
         self.transform = transform
 
@@ -239,6 +238,7 @@ class LabelCollection(object):
                 )
             )
         self.label_list = list(self.define_label_set(data_type))
+        self.labels = self.label_list
 
         # update our label list using the transform
         # if self.transform is not None:
