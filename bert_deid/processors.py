@@ -192,21 +192,7 @@ class DeidProcessor(TokenClassificationTask):
     def write_predictions_to_file(
         self, writer: TextIO, test_input_reader: TextIO, preds_list: List
     ):
-        example_id = 0
-        for line in test_input_reader:
-            if line.startswith("-DOCSTART-") or line == "" or line == "\n":
-                writer.write(line)
-                if not preds_list[example_id]:
-                    example_id += 1
-            elif preds_list[example_id]:
-                output_line = line.split(
-                )[0] + " " + preds_list[example_id].pop(0) + "\n"
-                writer.write(output_line)
-            else:
-                logger.warning(
-                    "Maximum sequence length exceeded: No prediction for '%s'.",
-                    line.split()[0]
-                )
+        writer.write('\n'.join(preds_list))
 
     # methods for assigning labels // tokenizing
     def get_token_labels(
@@ -317,6 +303,7 @@ class DeidProcessor(TokenClassificationTask):
         label_list: List[str],
         tokenizer,
         feature_overlap=None,
+        include_offsets=False,
     ):
         """
         Loads a data file into a list of `InputFeatures`s
@@ -345,33 +332,34 @@ class DeidProcessor(TokenClassificationTask):
                 encoded.words[i + 1] == encoded.words[i]
                 for i in range(len(encoded.words) - 1)
             ]
-            start_idx = np.array(encoded.offsets)
+            token_offsets = np.array(encoded.offsets)
 
-            # remove subwords
-            start_idx = start_idx[~np.array(token_sw), :]
-
-            # if overlapping in sequences, get length of each subseq
+            seq_len = tokenizer.max_len_single_sentence
             if feature_overlap is None:
-                seq_len = tokenizer.max_len_single_sentence
-            else:
-                seq_len = int(
-                    (1 - feature_overlap) * (tokenizer.max_len_single_sentence)
-                )
-
+                feature_overlap = 0
             # identify the starting offsets for each sub-sequence
-            new_seq_idx = np.floor(
-                start_idx[:, 0] / tokenizer.max_len_single_sentence
-            ).astype(int)
-            _, new_seq_idx = np.unique(new_seq_idx, return_index=True)
-            new_seq_idx = start_idx[new_seq_idx, :]
-            n_subseq = new_seq_idx.shape[0]
-
-            # add the length of the text as the end of the final subsequence
-            new_seq_idx = np.row_stack([new_seq_idx, [len(example.text), 0]])
+            new_seq_jump = int(
+                (1 - feature_overlap) * seq_len
+            )
 
             # iterate through subsequences and add to examples
-            for i in range(n_subseq):
-                text = example.text[new_seq_idx[i, 0]:new_seq_idx[i + 1, 0]]
+            start = 0
+            while start < token_offsets.shape[0]:
+                # ensure we do not start on a sub-word token
+                while token_sw[start]:
+                    start -= 1
+
+                stop = start + seq_len
+                if stop < token_offsets.shape[0]:
+                    # ensure we don't split sequences on a sub-word token
+                    # do this by shortening the current sequence
+                    while token_sw[stop]:
+                        stop -= 1
+                else:
+                    # end the sub sequence at the end of the text
+                    stop = token_offsets.shape[0] - 1
+
+                text = example.text[token_offsets[start, 0]:token_offsets[stop, 0]]
                 encoded = tokenizer._tokenizer.encode(text)
                 encoded.pad(tokenizer.model_max_length)
 
@@ -380,7 +368,7 @@ class DeidProcessor(TokenClassificationTask):
                     encoded,
                     example.labels,
                     pad_token_label_id=pad_token_label_id,
-                    label_offset_shift=new_seq_idx[i, 0]
+                    label_offset_shift=token_offsets[start, 0]
                 )
 
                 features.append(
@@ -394,4 +382,8 @@ class DeidProcessor(TokenClassificationTask):
                     )
                 )
                 n_obs += 1
+
+                # update start of next sequence to be end of current one
+                start = start + new_seq_jump
+
         return features
