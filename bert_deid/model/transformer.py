@@ -65,9 +65,9 @@ class Transformer(object):
         # self.sequence_length = sequence_length
 
         # get the definition classes for the model
-        training_args = torch.load(
-            os.path.join(model_path, 'training_args.bin')
-        )
+        # training_args = torch.load(
+        #     os.path.join(model_path, 'training_args.bin')
+        # )
 
         # task applied
         # TODO: figure out how to load this from saved model
@@ -159,52 +159,40 @@ class Transformer(object):
         encoded = self.tokenizer._tokenizer.encode(
             text, add_special_tokens=False
         )
-        tokens = encoded.tokens
-        ids = encoded.ids
         token_sw = [False] + [
             encoded.words[i + 1] == encoded.words[i]
             for i in range(len(encoded.words) - 1)
         ]
+        token_offsets = np.array(encoded.offsets)
 
-        # prepare to split long segments into multiple sequences
-        start_idx = np.array(encoded.offsets)
-
-        # remove subwords as we do not want to split on them
-        start_idx = start_idx[~np.array(token_sw), :]
-
-        # if overlapping in sequences, get length of each subseq
+        seq_len = self.tokenizer.max_len_single_sentence
         if feature_overlap is None:
-            seq_len = self.tokenizer.max_len_single_sentence
-        else:
-            seq_len = int(
-                (1 - feature_overlap) *
-                (self.tokenizer.max_len_single_sentence)
-            )
-
+            feature_overlap = 0
         # identify the starting offsets for each sub-sequence
-        new_seq_idx = np.floor(
-            start_idx[:, 0] / self.tokenizer.max_len_single_sentence
-        ).astype(int)
-        _, new_seq_idx = np.unique(new_seq_idx, return_index=True)
-        new_seq_idx = start_idx[new_seq_idx, :]
-        n_subseq = new_seq_idx.shape[0]
-
-        # add the length of the text as the end of the final subsequence
-        new_seq_idx = np.row_stack([new_seq_idx, [len(text), 0]])
+        new_seq_jump = int((1 - feature_overlap) * seq_len)
 
         # iterate through subsequences and add to examples
         inputs = []
+        start = 0
+        while start < token_offsets.shape[0]:
+            # ensure we do not start on a sub-word token
+            while token_sw[start]:
+                start -= 1
 
-        seq_start_offset = 0
-        for i in range(n_subseq):
-            seq_start_offset = new_seq_idx[i, 0]
-            text_subseq = text[seq_start_offset:new_seq_idx[i + 1, 0]]
+            stop = start + seq_len
+            if stop < token_offsets.shape[0]:
+                # ensure we don't split sequences on a sub-word token
+                # do this by shortening the current sequence
+                while token_sw[stop]:
+                    stop -= 1
+            else:
+                # end the sub sequence at the end of the text
+                stop = token_offsets.shape[0] - 1
+
+            text_subseq = text[token_offsets[start, 0]:token_offsets[stop, 0]]
             encoded = self.tokenizer._tokenizer.encode(text_subseq)
             encoded.pad(self.tokenizer.model_max_length)
-            token_sw = [False] + [
-                encoded.words[i + 1] == encoded.words[i]
-                for i in range(len(encoded.words) - 1)
-            ]
+
             inputs.append(
                 InputFeatures(
                     input_ids=encoded.ids,
@@ -212,10 +200,16 @@ class Transformer(object):
                     token_type_ids=encoded.type_ids,
                     input_subwords=token_sw,
                     # note the offsets are based off the original text, not the subseq
-                    offsets=[o[0] + seq_start_offset for o in encoded.offsets],
+                    offsets=[
+                        o[0] + token_offsets[start, 0] for o in encoded.offsets
+                    ],
                     lengths=[o[1] - o[0] for o in encoded.offsets]
                 )
             )
+
+            # update start of next sequence to be end of current one
+            start = start + new_seq_jump
+
         return inputs
 
     def _features_to_tensor(self, inputs):
