@@ -243,8 +243,8 @@ class Transformer(object):
         labels = []
         for i in range(logits.shape[0]):
             # extract mask for valid tokens, offsets, and lengths
-            mask, offsets, lengths = inputs[i].attention_mask, inputs[
-                i].offsets, inputs[i].lengths
+            mask = np.asarray(inputs[i].attention_mask).astype(bool)
+            offsets, lengths = inputs[i].offsets, inputs[i].lengths
             subwords = inputs[i].input_subwords
 
             # increment the lengths for the first token in words tokenized into subwords
@@ -262,14 +262,14 @@ class Transformer(object):
             idxObject = np.asarray([p == ignore_label
                                     for p in pred_label]).astype(bool)
 
-            # keep a subset of the token labels
-            idxKeep = np.where((mask == 1) & idxObject)[0]
+            # keep (1) unmasked labels where (2) it is not an object (the default category)
+            idxKeep = np.where(mask & ~idxObject)[0]
 
             labels.extend(
                 [
                     [
-                        pred_prob[i, p], pred_label[p], offsets[i, p],
-                        lengths[i, p]
+                        pred_prob[i, p], pred_label[p], offsets[p],
+                        lengths[p]
                     ] for p in idxKeep
                 ]
             )
