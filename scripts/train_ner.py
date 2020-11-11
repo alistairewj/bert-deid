@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from functools import partial
 from importlib import import_module
 from typing import Dict, List, Optional, Tuple
 
@@ -41,6 +42,7 @@ from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 
 from bert_deid.processors import Split, TokenClassificationTask
 from bert_deid.datasets import TokenClassificationDataset
+from bert_deid.tokenization import align_predictions
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +188,6 @@ def main():
         data_args.task_type, transform=data_args.label_transform
     )
     # data_args.num_labels = len(label_set.label_list)
-
     token_classification_task = processors.DeidProcessor(
         data_args.data_dir, label_set
     )
@@ -252,27 +253,9 @@ def main():
         ) if training_args.do_eval else None
     )
 
-    def align_predictions(predictions: np.ndarray,
-                          label_ids: np.ndarray) -> Tuple[List[int], List[int]]:
-        preds = np.argmax(predictions, axis=2)
-
-        batch_size, seq_len = preds.shape
-
-        out_label_list = [[] for _ in range(batch_size)]
-        preds_list = [[] for _ in range(batch_size)]
-
-        for i in range(batch_size):
-            for j in range(seq_len):
-                if label_ids[i, j] != nn.CrossEntropyLoss().ignore_index:
-                    out_label_list[i].append(label_map[label_ids[i][j]])
-                    preds_list[i].append(label_map[preds[i][j]])
-
-        return preds_list, out_label_list
-
     def compute_metrics(p: EvalPrediction) -> Dict:
-        preds_list, out_label_list = align_predictions(
-            p.predictions, p.label_ids
-        )
+        align = partial(align_predictions, label_map=label_map)
+        preds_list, out_label_list = align(p.predictions, p.label_ids)
         return {
             "accuracy_score": accuracy_score(out_label_list, preds_list),
             "precision": precision_score(out_label_list, preds_list),
@@ -291,10 +274,23 @@ def main():
 
     # Training
     if training_args.do_train:
+        # validate the labels
+        for feature in train_dataset.features:
+            assert all(
+                [
+                    t == -100 or (t >= 0 and t <= model.num_labels)
+                    for t in feature.label_ids
+                ]
+            ), 'label_ids outside valid range for num_labels, check cache'
+
         trainer.train(
-            model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
+            model_path=model_args.model_name_or_path if os.path.
+            isdir(model_args.model_name_or_path) else None
         )
         trainer.save_model()
+
+        # TODO: save label set as well
+
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
@@ -333,7 +329,7 @@ def main():
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)
-        preds_list, _ = align_predictions(predictions, label_ids)
+        preds_list, out_label_list = align_predictions(predictions, label_ids, label_map)
 
         output_test_results_file = os.path.join(
             training_args.output_dir, "test_results.txt"
@@ -350,12 +346,23 @@ def main():
         )
         if trainer.is_world_master():
             with open(output_test_predictions_file, "w") as writer:
-                with open(
-                    os.path.join(data_args.data_dir, "test.txt"), "r"
-                ) as f:
-                    token_classification_task.write_predictions_to_file(
-                        writer, f, preds_list
+                for i in range(len(preds_list)):
+                    """
+                    labels_to_write = [
+                        'PAD' if label_ids[i][j] == -100 else
+                        token_classification_task.label_set.id_to_label[
+                            label_ids[i][j]] for j in range(len(preds_list[i]))
+                    ]
+                    """
+                    writer.write(
+                        '\n'.join(
+                            [
+                                f'{i},{preds_list[i][j]},{out_label_list[i][j]}'
+                                for j in range(len(preds_list[i]))
+                            ]
+                        )
                     )
+                    writer.write('\n')
 
     return results
 
