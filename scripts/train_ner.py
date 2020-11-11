@@ -329,7 +329,9 @@ def main():
         )
 
         predictions, label_ids, metrics = trainer.predict(test_dataset)
-        preds_list, out_label_list = align_predictions(predictions, label_ids, label_map)
+        preds_list, out_label_list = align_predictions(
+            predictions, label_ids, label_map
+        )
 
         output_test_results_file = os.path.join(
             training_args.output_dir, "test_results.txt"

@@ -190,9 +190,10 @@ def map_tags_to_tokens(example, offsets):
     tags = np.column_stack(list(tags.values()))
     return tags
 
-def align_predictions(predictions: np.ndarray,
-                      label_ids: np.ndarray,
-                      label_map: dict) -> Tuple[List[int], List[int]]:
+
+def align_predictions(
+    predictions: np.ndarray, label_ids: np.ndarray, label_map: dict
+) -> Tuple[List[int], List[int]]:
     preds = np.argmax(predictions, axis=2)
 
     batch_size = preds.shape[0]
@@ -205,11 +206,7 @@ def align_predictions(predictions: np.ndarray,
     out_label_list = []
     preds_list = []
     for i in range(batch_size):
-        out_label_list.append(
-            list(map(label_map.get, label_ids[i, idx[i, :]]))
-        )
-        preds_list.append(
-            list(map(label_map.get, preds[i, idx[i, :]]))
-        )
+        out_label_list.append(list(map(label_map.get, label_ids[i, idx[i, :]])))
+        preds_list.append(list(map(label_map.get, preds[i, idx[i, :]])))
 
     return preds_list, out_label_list

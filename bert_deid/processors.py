@@ -229,8 +229,6 @@ class DeidProcessor(TokenClassificationTask):
             return token_labels, label_ids
 
         offsets = [o[0] for o in encoded.offsets]
-        lengths = [o[1] - o[0] for o in encoded.offsets]
-        w = 0
         for label in labels:
             entity_type = label.entity_type
             start, offset = label.start, label.length
@@ -326,8 +324,6 @@ class DeidProcessor(TokenClassificationTask):
             encoded = tokenizer._tokenizer.encode(
                 example.text, add_special_tokens=False
             )
-            tokens = encoded.tokens
-            ids = encoded.ids
             token_sw = [False] + [
                 encoded.words[i + 1] == encoded.words[i]
                 for i in range(len(encoded.words) - 1)
@@ -338,9 +334,7 @@ class DeidProcessor(TokenClassificationTask):
             if feature_overlap is None:
                 feature_overlap = 0
             # identify the starting offsets for each sub-sequence
-            new_seq_jump = int(
-                (1 - feature_overlap) * seq_len
-            )
+            new_seq_jump = int((1 - feature_overlap) * seq_len)
 
             # iterate through subsequences and add to examples
             start = 0
@@ -359,12 +353,13 @@ class DeidProcessor(TokenClassificationTask):
                     # end the sub sequence at the end of the text
                     stop = token_offsets.shape[0] - 1
 
-                text = example.text[token_offsets[start, 0]:token_offsets[stop, 0]]
+                text = example.text[token_offsets[start, 0]:token_offsets[stop,
+                                                                          0]]
                 encoded = tokenizer._tokenizer.encode(text)
                 encoded.pad(tokenizer.model_max_length)
 
                 # assign labels based off the offsets
-                labels, label_ids = self.get_token_labels(
+                _, label_ids = self.get_token_labels(
                     encoded,
                     example.labels,
                     pad_token_label_id=pad_token_label_id,
