@@ -3,6 +3,8 @@ import os
 import re
 import logging
 from hashlib import sha256
+from dataclasses import astuple, dataclass, fields
+from typing import List, Optional, Union, TextIO
 
 import numpy as np
 import pandas as pd
@@ -15,85 +17,36 @@ from torch.utils.data import (
 )
 
 from transformers import (
-    WEIGHTS_NAME,
-    AdamW,
-    AlbertConfig,
-    AlbertTokenizer,
-    BertConfig,
-    BertForTokenClassification,
-    BertTokenizer,
-    BertTokenizerFast,
-    BertModel,
-    CamembertConfig,
-    CamembertForTokenClassification,
-    CamembertTokenizer,
-    DistilBertConfig,
-    DistilBertForTokenClassification,
-    DistilBertTokenizer,
-    DistilBertTokenizerFast,
-    RobertaConfig,
-    RobertaForTokenClassification,
-    RobertaTokenizer,
-    RobertaTokenizerFast,
-    XLMRobertaConfig,
-    XLMRobertaForTokenClassification,
-    XLMRobertaTokenizer,
-    get_linear_schedule_with_warmup,
+    AutoConfig,
+    AutoModelForTokenClassification,
+    AutoTokenizer,
+    set_seed,
 )
 
-# custom class written for albert token classification
-from bert_deid.modeling import AlbertForTokenClassification
-from bert_deid import processors, tokenization
-from bert_deid.BERT_CRF import BertCRF
-from bert_deid.label import LABEL_SETS, LabelCollection, LABEL_MEMBERSHIP
-from bert_deid.extra_feature import ModelExtraFeature
-from bert_deid.extra_feature_crf import ModelExtraFeatureCRF
+from bert_deid.processors import InputFeatures, TokenClassificationTask, Split
 
-MODEL_CLASSES = {
-    "albert": (AlbertConfig, AlbertForTokenClassification, AlbertTokenizer),
-    "bert": (BertConfig, BertForTokenClassification, BertTokenizer),
-    "roberta": (RobertaConfig, RobertaForTokenClassification, RobertaTokenizer),
-    "distilbert":
-        (
-            DistilBertConfig, DistilBertForTokenClassification,
-            DistilBertTokenizer
-        ),
-    "camembert":
-        (CamembertConfig, CamembertForTokenClassification, CamembertTokenizer),
-    "xlmroberta":
-        (
-            XLMRobertaConfig, XLMRobertaForTokenClassification,
-            XLMRobertaTokenizer
-        ),
-    'bert_crf': (BertConfig, BertCRF, BertTokenizer),
-    'bert_extra_feature': (BertConfig, ModelExtraFeature, BertTokenizer),
-    'bert_extra_feature_crf': (BertConfig, ModelExtraFeatureCRF, BertTokenizer),
-    'biobert': (BertConfig, BertForTokenClassification, BertTokenizer),
-}
+# custom class written for albert token classification
+from bert_deid import tokenization, processors
+from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
+from bert_deid.processors import InputExample
 
 logger = logging.getLogger(__name__)
 
 
-def pool_annotations(df):
-    # pool token-wise annotations together
-    # this is necessary if overlapping examples are used
-    # i.e. self.token_step_size < self.sequence_length
-    if df.shape[0] == 0:
-        return df
+@dataclass
+class InputFeatures:
+    """
+    A single set of features of data.
+    Property names are the same names as the corresponding inputs to a model.
+    """
 
-    # get location of maximally confident annotations
-    df_keep = df.groupby(['annotator', 'start', 'stop'])[['confidence']].max()
-
-    df_keep.reset_index(inplace=True)
-
-    # merge on these columns to remove rows with low confidence
-    grp_cols = list(df_keep.columns)
-    df = df.merge(df_keep, how='inner', on=grp_cols)
-
-    # if two rows had identical confidence, keep the first
-    df.drop_duplicates(subset=grp_cols, keep='first', inplace=True)
-
-    return df
+    input_ids: List[int]
+    attention_mask: List[int]
+    token_type_ids: Optional[List[int]] = None
+    label_ids: Optional[List[int]] = None
+    input_subwords: Optional[List[int]] = None
+    offsets: Optional[List[int]] = None
+    lengths: Optional[List[int]] = None
 
 
 class Transformer(object):
@@ -105,12 +58,7 @@ class Transformer(object):
         # sequence_length=100,
         max_seq_length=128,
         device='cpu',
-        patterns=[],
     ):
-        self.label_set = torch.load(os.path.join(model_path, "label_set.bin"))
-        self.num_labels = len(self.label_set.label_list)
-        self.patterns = patterns
-
         # by default, we do non-overlapping segments of text
         # self.token_step_size = token_step_size
         # sequence_length is how long each example for the model is
@@ -120,25 +68,39 @@ class Transformer(object):
         training_args = torch.load(
             os.path.join(model_path, 'training_args.bin')
         )
-        self.model_type = training_args.model_type
+
+        # task applied
+        # TODO: figure out how to load this from saved model
+        label_set = LabelCollection('i2b2_2014', transform='simple')
+        self.token_classification_task = processors.DeidProcessor(
+            data_dir='', label_set=label_set
+        )
+
+        # Load pretrained model and tokenizer
+        self.config = AutoConfig.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            # we always use fast tokenizers as we need offsets from tokenization
+            use_fast=True,
+        )
+        self.model = AutoModelForTokenClassification.from_pretrained(
+            model_path,
+            from_tf=False,
+            config=self.config,
+        )
 
         # max seq length is what we pad the model to
         # max seq length should always be >= sequence_length + 2
-        self.max_seq_length = training_args.max_seq_length
+        self.max_seq_length = self.config.max_position_embeddings
 
-        config_class, model_class, tokenizer_class = MODEL_CLASSES[
-            self.model_type]
+        label_map = self.config.id2label
+        self.labels = [label_map[i] for i in range(len(label_map))]
+        self.num_labels = len(self.labels)
 
         # Use cross entropy ignore index as padding label id so
         # that only real label ids contribute to the loss later
+        # TODO: get this from the model
         self.pad_token_label_id = CrossEntropyLoss().ignore_index
-        # initialize the model
-        self.config = config_class.from_pretrained(model_path)
-        self.tokenizer = tokenizer_class.from_pretrained(model_path)
-        model_param = {'pretrained_model_name_or_path': model_path}
-        if model_type == 'bert_extra_feature' or model_type == 'bert_extra_feature_crf':
-            model_param['num_features'] = len(self.patterns)
-        self.model = model_class.from_pretrained(**model_param)
 
         # prepare the model for evaluation
         # CPU probably faster, avoids overhead
@@ -191,150 +153,132 @@ class Transformer(object):
 
         return examples
 
-    def predict(self, text, document_id, batch_size=8):
-        # args, model, tokenizer, processor, pad_token_label_id, mode="test"
-        # sets the model to evaluation mode to fix parameters
-        self.model.eval()
-
-        # annotate a string of text
-        # split the text into examples
-        # we choose non-overlapping examples for evaluation
-        # examples = split_by_overlap(
-        #    text,
-        #    self.tokenizer,
-        #    token_step_size=self.token_step_size,
-        #    sequence_length=self.sequence_length
-        #)
-
-        # in this case we have a length 1 example
-        # we use the SHA-256 hash of the text as the globally unique identifier
-        # guid = sha256(text.encode()).hexdigest()
-        guid = document_id
-        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
-        features = self.tokenizer.convert_examples_to_features(
-            examples,
-            self.label_set.label_to_id,
-            self.max_seq_length,
-            self.tokenizer,
-            cls_token_at_end=bool(self.model_type in ["xlnet"]),
-            # xlnet has a cls token at the end
-            cls_token=self.tokenizer.cls_token,
-            cls_token_segment_id=2 if self.model_type in ["xlnet"] else 0,
-            sep_token=self.tokenizer.sep_token,
-            sep_token_extra=bool(self.model_type in ["roberta"]),
-            # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
-            pad_on_left=bool(self.model_type in ["xlnet"]),
-            # pad on the left for xlnet
-            pad_token=self.tokenizer.pad_token,
-            pad_token_segment_id=4 if self.model_type in ["xlnet"] else 0,
-            pad_token_label_id=self.pad_token_label_id,
-            feature_overlap=0
+    def _split_text_into_segments(self, text, feature_overlap=None):
+        """Splits text into overlapping segments based on the model sequence length."""
+        # tokenize the example text
+        encoded = self.tokenizer._tokenizer.encode(
+            text, add_special_tokens=False
         )
+        tokens = encoded.tokens
+        ids = encoded.ids
+        token_sw = [False] + [
+            encoded.words[i + 1] == encoded.words[i]
+            for i in range(len(encoded.words) - 1)
+        ]
 
-        # Convert to Tensors and build dataset
-        all_input_ids = torch.tensor(
-            [f.input_ids for f in features], dtype=torch.long
-        )
-        all_input_mask = torch.tensor(
-            [f.input_mask for f in features], dtype=torch.long
-        )
-        all_segment_ids = torch.tensor(
-            [f.segment_ids for f in features], dtype=torch.long
-        )
-        all_label_ids = torch.tensor(
-            [f.label_ids for f in features], dtype=torch.long
-        )
+        # prepare to split long segments into multiple sequences
+        start_idx = np.array(encoded.offsets)
 
-        # find subwords proportion:
-        total = 0
-        non_pad_tokens = 0
-        for f in features:
-            total += np.count_nonzero(np.array(f.input_subwords))
-            non_pad_tokens += np.count_nonzero(np.array(f.input_mask))
-        non_pad_tokens -= 2 * len(features)
-        num_subwords += total
-        num_tokens += non_pad_tokens
-        # print (f'Prediction: Number of subwords: {total} out of number of tokens {non_pad_tokens}')
+        # remove subwords as we do not want to split on them
+        start_idx = start_idx[~np.array(token_sw), :]
 
-        eval_dataset = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
-            all_extra_features
-        )
-        eval_sampler = SequentialSampler(eval_dataset)
-        eval_dataloader = DataLoader(
-            eval_dataset, sampler=eval_sampler, batch_size=batch_size
-        )
+        # if overlapping in sequences, get length of each subseq
+        if feature_overlap is None:
+            seq_len = self.tokenizer.max_len_single_sentence
+        else:
+            seq_len = int(
+                (1 - feature_overlap) *
+                (self.tokenizer.max_len_single_sentence)
+            )
 
-        logits = None
-        out_label_ids = None
-        mask = None
+        # identify the starting offsets for each sub-sequence
+        new_seq_idx = np.floor(
+            start_idx[:, 0] / self.tokenizer.max_len_single_sentence
+        ).astype(int)
+        _, new_seq_idx = np.unique(new_seq_idx, return_index=True)
+        new_seq_idx = start_idx[new_seq_idx, :]
+        n_subseq = new_seq_idx.shape[0]
 
-        for batch in dataloader:
-            batch = tuple(t.to(self.device) for t in batch)
+        # add the length of the text as the end of the final subsequence
+        new_seq_idx = np.row_stack([new_seq_idx, [len(text), 0]])
 
-            with torch.no_grad():
-                inputs = {
-                    "input_ids": batch[0],
-                    "attention_mask": batch[1],
-                    "labels": batch[3]
-                }
-                if self.model_type != "distilbert":
-                    inputs["token_type_ids"] = (
-                        batch[2]
-                        if self.model_type in ["bert", "xlnet"] else None
-                    )  # XLM and RoBERTa don"t use segment_ids
-                if self.model_type == 'bert_extra_feature' or self.model_type == 'bert_extra_feature_crf':
-                    inputs['extra_features'] = batch[4]
-                outputs = self.model(**inputs)
-                _, batch_logits = outputs[:2]
+        # iterate through subsequences and add to examples
+        inputs = []
 
-            # extract output predictions (logits) as a numpy array
-            # N_BATCHES x N_SEQ_LENGTH x N_LABELS
-            batch_logits = batch_logits.detach().cpu().numpy()
-            batch_size, seq_len = batch_logits.shape[:2]
-            if self.model_type == 'bert_crf' or self.model_type == 'bert_extra_feature_crf':
-                # BertCRF only gives a label prediction
-                # broadcast to (,,num_label) to match to BERT output
-                batch_logits = np.expand_dims(batch_logits, axis=2)
-                batch_logits = batch_logits.astype(int)
-            if logits is None:
-                logits = batch_logits
-                out_label_ids = inputs["labels"].detach().cpu().numpy()
-            else:
-                logits = np.append(logits, batch_logits, axis=0)
-                out_label_ids = np.append(
-                    out_label_ids,
-                    inputs["labels"].detach().cpu().numpy(),
-                    axis=0
+        seq_start_offset = 0
+        for i in range(n_subseq):
+            seq_start_offset = new_seq_idx[i, 0]
+            text_subseq = text[seq_start_offset:new_seq_idx[i + 1, 0]]
+            encoded = self.tokenizer._tokenizer.encode(text_subseq)
+            encoded.pad(self.tokenizer.model_max_length)
+            token_sw = [False] + [
+                encoded.words[i + 1] == encoded.words[i]
+                for i in range(len(encoded.words) - 1)
+            ]
+            inputs.append(
+                InputFeatures(
+                    input_ids=encoded.ids,
+                    attention_mask=encoded.attention_mask,
+                    token_type_ids=encoded.type_ids,
+                    input_subwords=token_sw,
+                    # note the offsets are based off the original text, not the subseq
+                    offsets=[o[0] + seq_start_offset for o in encoded.offsets],
+                    lengths=[o[1] - o[0] for o in encoded.offsets]
                 )
+            )
+        return inputs
+
+    def _features_to_tensor(self, inputs):
+        """Extracts tensor datasets from a list of InputFeatures"""
+
+        # create tensor datasets for model input
+        input_ids = torch.tensor(
+            [x.input_ids for x in inputs], dtype=torch.long
+        )
+        attention_mask = torch.tensor(
+            [x.attention_mask for x in inputs], dtype=torch.long
+        )
+        token_type_ids = torch.tensor(
+            [x.token_type_ids for x in inputs], dtype=torch.long
+        )
+        return input_ids, attention_mask, token_type_ids
+
+    def _logits_to_standoff(self, logits, inputs, ignore_label='O'):
+        """Converts prediction logits to stand-off prediction labels."""
+        # mask, offsets, lengths
+        # convert logits to probabilities
+
+        # extract most likely label for each token
+        # TODO: convert logit to prob with softmax
+        # prob is used to decide between overlapping labels later
+        pred_id = np.argmax(logits, axis=2)
+        pred_prob = np.max(logits, axis=2)
 
         # re-align the predictions with the original text
-        preds, offsets, lengths = [], [], []
-        for f, feature in enumerate(features):
-            # get predictions for only the kept labels
-            idxKeep = np.where(out_label_ids[f, :] != self.pad_token_label_id
-                              )[0]
-            preds.append(logits[f, idxKeep, :])
-            # get offsets for only the kept labels
-            offsets.extend(
-                [
-                    x
-                    for i, x in enumerate(feature.input_offsets) if i in idxKeep
-                ]
-            )
+        # across each sub sequence..
+        labels = []
+        for i in range(logits.shape[0]):
+            # extract mask for valid tokens, offsets, and lengths
+            mask, offsets, lengths = inputs[i].attention_mask, inputs[
+                i].offsets, inputs[i].lengths
+            subwords = inputs[i].input_subwords
 
             # increment the lengths for the first token in words tokenized into subwords
-            feature_lengths = feature.input_lengths
-            for i in reversed(range(len(feature.input_subwords))):
-                if feature.input_subwords[i]:
+            # this ensures a prediction covers the subsequent subwords
+            # it assumes that predictions are made for the first token in sub-word tokens
+            # TODO: check the model only predicts a label for first sub-word token
+            lengths = inputs[i].lengths
+            for j in reversed(range(len(subwords))):
+                if subwords[j]:
                     # cumulatively sums lengths for subwords until the first subword token
-                    feature_lengths[i - 1] += feature_lengths[i]
+                    lengths[j - 1] += lengths[j]
 
-            lengths.extend(
-                [x for i, x in enumerate(feature_lengths) if i in idxKeep]
+            pred_label = [self.config.id2label[p] for p in pred_id[i, :]]
+            # ignore object labels
+            idxObject = np.asarray([p == ignore_label
+                                    for p in pred_label]).astype(bool)
+
+            # keep a subset of the token labels
+            idxKeep = np.where((mask == 1) & idxObject)[0]
+
+            labels.extend(
+                [
+                    [
+                        pred_prob[i, p], pred_label[p], offsets[i, p],
+                        lengths[i, p]
+                    ] for p in idxKeep
+                ]
             )
-
-        preds = np.concatenate(preds, axis=0)
 
         # now, we may have multiple predictions for the same offset token
         # this can happen as we are overlapping observations to maximize
@@ -343,14 +287,67 @@ class Transformer(object):
         # the most context
 
         # np.unique returns index of first unique value, so reverse the list
+        offsets = [l[2] for l in labels]
         offsets.reverse()
         _, unique_idx = np.unique(offsets, return_index=True)
         unique_idx = len(offsets) - unique_idx - 1
-        offsets.reverse()
+        labels = [labels[i] for i in unique_idx]
 
-        # align the predictions with the text offsets
-        offsets = [x for i, x in enumerate(offsets) if i in unique_idx]
-        lengths = [x for i, x in enumerate(lengths) if i in unique_idx]
-        preds = preds[unique_idx, :]
+        return labels
 
-        return preds, lengths, offsets, num_subwords, num_tokens
+    def predict(self, text, batch_size=8, num_workers=0, feature_overlap=None):
+        # sets the model to evaluation mode to fix parameters
+        self.model.eval()
+
+        # create a dictionary with inputs to the model
+        # each element is a list of the sequence data
+        inputs = self._split_text_into_segments(text, feature_overlap)
+        input_ids, attention_mask, token_type_ids = self._features_to_tensor(
+            inputs
+        )
+
+        with torch.no_grad():
+            logits = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids
+            )[0]
+
+        logits = logits.detach().cpu().numpy()
+        preds = self._logits_to_standoff(logits, inputs, ignore_label='O')
+
+        # returns a list of the predictions with the token span
+        return preds
+
+    """
+    def apply(self, text, repl='___'):
+        preds, lengths, offsets = self.predict(text)
+
+        # get the free-text label
+        labels = [
+            self.label_set.id_to_label[idxMax]
+            for idxMax in preds.argmax(axis=1)
+        ]
+
+        # merge entities which are adjacent
+        #removed_entities = np.zeros(len(labels), dtype=bool)
+        for i in reversed(range(len(labels))):
+            if i == 0 or labels[i] == 'O':
+                continue
+
+            if labels[i] == labels[i - 1]:
+                offset, length = offsets.pop(i), lengths.pop(i)
+                lengths[i - 1] = offset + length - offsets[i - 1]
+                labels.pop(i)
+
+        #keep_entities = ~removed_entities
+        #labels = [l for i, l in enumerate(labels) if keep_entities[i]]
+        #lengths = lengths[keep_entities]
+        #offsets = offsets[keep_entities]
+        for i in reversed(range(len(labels))):
+            if labels[i] != 'O':
+                # replace this instance of text with three underscores
+                text = text[:offsets[i]] + repl + text[offsets[i] + lengths[i]:]
+
+        return text
+    """
