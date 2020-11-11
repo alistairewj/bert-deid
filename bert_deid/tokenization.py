@@ -17,21 +17,18 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from typing import List, Tuple
 import collections
 import logging
 import os
+import re
 import unicodedata
 import itertools
 from bisect import bisect_left, bisect_right
-from bert_deid.ensemble_feature import (
-    find_phi_location,
-    create_extra_feature_vector,
-    find_phi_location_philter,
-)
+
+from torch.nn import CrossEntropyLoss
 import numpy as np
 import pandas as pd
-import re
-
 import tokenizers
 
 from bert_deid.processors import InputFeatures
@@ -192,3 +189,24 @@ def map_tags_to_tokens(example, offsets):
     # N is the number of tokens, M is the number of distinct entities
     tags = np.column_stack(list(tags.values()))
     return tags
+
+
+def align_predictions(
+    predictions: np.ndarray, label_ids: np.ndarray, label_map: dict
+) -> Tuple[List[int], List[int]]:
+    preds = np.argmax(predictions, axis=2)
+
+    batch_size = preds.shape[0]
+
+    out_label_list = [[] for _ in range(batch_size)]
+    preds_list = [[] for _ in range(batch_size)]
+
+    # ignore instances where label_id == cross entropy ignore
+    idx = label_ids != CrossEntropyLoss().ignore_index
+    out_label_list = []
+    preds_list = []
+    for i in range(batch_size):
+        out_label_list.append(list(map(label_map.get, label_ids[i, idx[i, :]])))
+        preds_list.append(list(map(label_map.get, preds[i, idx[i, :]])))
+
+    return preds_list, out_label_list
