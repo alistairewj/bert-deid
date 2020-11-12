@@ -238,10 +238,13 @@ class Transformer(object):
         # convert logits to probabilities
 
         # extract most likely label for each token
-        # TODO: convert logit to prob with softmax
         # prob is used to decide between overlapping labels later
         pred_id = np.argmax(logits, axis=2)
-        pred_prob = np.max(logits, axis=2)
+        # calculate softmax
+        probs = np.exp(logits - np.expand_dims(np.max(logits, axis=2), 2))
+        probs = probs / np.expand_dims(probs.sum(axis=2), 2)
+        # get max probability
+        probs = np.max(probs, axis=2)
 
         # re-align the predictions with the original text
         # across each sub sequence..
@@ -272,10 +275,8 @@ class Transformer(object):
 
             labels.extend(
                 [
-                    [
-                        pred_prob[i, p], pred_label[p], offsets[p],
-                        lengths[p]
-                    ] for p in idxKeep
+                    [probs[i, p], pred_label[p], offsets[p], lengths[p]]
+                    for p in idxKeep
                 ]
             )
 
