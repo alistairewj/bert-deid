@@ -193,12 +193,17 @@ class Transformer(object):
             encoded = self.tokenizer._tokenizer.encode(text_subseq)
             encoded.pad(self.tokenizer.model_max_length)
 
+            subseq_sw = [False] + [
+                encoded.words[i + 1] == encoded.words[i]
+                for i in range(len(encoded.words) - 1)
+            ]
+
             inputs.append(
                 InputFeatures(
                     input_ids=encoded.ids,
                     attention_mask=encoded.attention_mask,
                     token_type_ids=encoded.type_ids,
-                    input_subwords=token_sw,
+                    input_subwords=subseq_sw,
                     # note the offsets are based off the original text, not the subseq
                     offsets=[
                         o[0] + token_offsets[start, 0] for o in encoded.offsets
