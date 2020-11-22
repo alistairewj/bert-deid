@@ -202,7 +202,9 @@ class Transformer(object):
                     token_type_ids=encoded.type_ids,
                     input_subwords=subseq_sw,
                     # note the offsets are based off the original text, not the subseq
-                    offsets=[o[0] + token_offsets[start, 0] for o in encoded.offsets],
+                    offsets=[
+                        o[0] + token_offsets[start, 0] for o in encoded.offsets
+                    ],
                     lengths=[o[1] - o[0] for o in encoded.offsets]
                 )
             )
@@ -253,7 +255,7 @@ class Transformer(object):
             # increment the lengths for the first token in words tokenized into subwords
             # this ensures a prediction covers the subsequent subwords
             # it assumes that predictions are made for the first token in sub-word tokens
-            # TODO: check the model only predicts a label for first sub-word token
+            # TODO: assert the model only predicts a label for first sub-word token
             lengths = inputs[i].lengths
             for j in reversed(range(len(subwords))):
                 if subwords[j]:
@@ -262,11 +264,23 @@ class Transformer(object):
 
             pred_label = [self.config.id2label[p] for p in pred_id[i, :]]
             # ignore object labels
-            idxObject = np.asarray([p == ignore_label
-                                    for p in pred_label]).astype(bool)
+            mask = mask & ~(
+                np.asarray([p == ignore_label
+                            for p in pred_label]).astype(bool)
+            )
+
+            # ignore CLS and SEP tokens
+            mask = mask & np.asarray(
+                [
+                    (inp != self.tokenizer.cls_token_id) &
+                    (inp != self.tokenizer.sep_token_id)
+                    for inp in inputs[i].input_ids
+                ]
+            ).astype(bool)
 
             # keep (1) unmasked labels where (2) it is not an object (the default category)
-            idxKeep = np.where(mask & ~idxObject)[0]
+            # and (3) it is not a special CLS/SEP token
+            idxKeep = np.where(mask)[0]
 
             labels.extend(
                 [
