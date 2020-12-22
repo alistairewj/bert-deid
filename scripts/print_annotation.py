@@ -1,3 +1,7 @@
+"""
+Print out a text file to terminal with annotations colored.
+"""
+
 from __future__ import absolute_import, division, print_function
 
 import json
@@ -5,17 +9,38 @@ import os
 import logging
 import argparse
 import sys
-
-from bert_deid import utils
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
-"""
-Runs BERT deid on a set of text files.
-Evaluates the output using gold standard annotations.
 
-Optionally outputs mismatches to brat standoff format.
-"""
+ANN_COLUMNS = ['document_id', 'start', 'stop', 'entity_type']
+
+
+def load_ann_csv(path):
+    ann = pd.read_csv(
+        path,
+        header=0,
+        dtype={
+            'entity': str,
+            'entity_type': str,
+            'offset': int,
+            'length': int
+        }
+    )
+    if 'document_id' not in ann:
+        ann['document_id'] = path.stem
+
+    ann.rename(columns={'offset': 'start'}, inplace=True)
+    if 'length' not in ann.columns:
+        ann['length'] = ann['stop'] - ann['start']
+    elif 'stop' not in ann.columns:
+        ann['stop'] = ann['start'] + ann['length']
+
+    ann = ann[ANN_COLUMNS]
+
+    return ann
+
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -89,15 +114,10 @@ def main():
         text = ''.join(fp.readlines())
 
     # load output of bert-deid
-    df = pd.read_csv(
-        fn_pred, header=0, dtype={
-            'entity': str,
-            'entity_type': str
-        }
-    )
+    df = load_ann_csv(Path(fn_pred))
 
     # load ground truth
-    gs = pd.read_csv(fn_gs, header=0, dtype={'entity': str, 'entity_type': str})
+    gs = load_ann_csv(Path(fn_gs))
 
     # binary vector indicating PHI/not phi
     text_tar = np.zeros(len(text), dtype=bool)
