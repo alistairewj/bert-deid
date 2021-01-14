@@ -318,6 +318,11 @@ class Transformer(object):
             inputs
         )
 
+        # ensure input is on same device as model
+        input_ids = input_ids.to(self.model.device)
+        attention_mask = attention_mask.to(self.model.device)
+        token_type_ids = token_type_ids.to(self.model.device)
+
         with torch.no_grad():
             logits = self.model(
                 input_ids=input_ids,
