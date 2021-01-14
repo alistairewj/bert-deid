@@ -2,6 +2,8 @@
 import os
 import re
 import logging
+from typing import Sequence, Union
+
 from hashlib import sha256
 
 import numpy as np
@@ -62,6 +64,19 @@ MODEL_CLASSES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def TensorDatasetWithIndices(cls):
+    """
+    Update a TensorDataset class to also return the index.
+    """
+    def __getitem__(self, index):
+        out = cls.__getitem__(self, index)
+        return index, out
+
+    return type(cls.__name__, (cls, ), {
+        '__getitem__': __getitem__,
+    })
 
 
 def pool_annotations(df):
@@ -173,7 +188,25 @@ class Transformer(object):
 
         return examples
 
-    def predict(self, text, batch_size=8):
+    def _prepare_examples(self, text: Sequence[str]) -> list:
+        """Outputs a list of InputExamples.
+        
+        Args:
+            text: either a single text string, or a sequence of strings
+
+        Returns:
+            list: list of InputExample
+        """
+        # we use the SHA-256 hash of the text as the identifier
+        return [
+            processors.InputExample(
+                guid=sha256(x.encode()).hexdigest(), text=x, labels=None
+            ) for x in text
+        ]
+
+    def predict(self, records: Sequence[str], batch_size=8):
+        if isinstance(records, str):
+            raise ValueError('If classifying PHI in a string, use predict_text')
         # args, model, tokenizer, processor, pad_token_label_id, mode="test"
         # sets the model to evaluation mode to fix parameters
         self.model.eval()
@@ -188,10 +221,7 @@ class Transformer(object):
         #    sequence_length=self.sequence_length
         #)
 
-        # in this case we have a length 1 example
-        # we use the SHA-256 hash of the text as the globally unique identifier
-        guid = sha256(text.encode()).hexdigest()
-        examples = [processors.InputExample(guid=guid, text=text, labels=None)]
+        examples = self._prepare_examples(records)
         features = tokenization.convert_examples_to_features(
             examples,
             self.label_set.label_to_id,
@@ -227,8 +257,13 @@ class Transformer(object):
         all_label_ids = torch.tensor(
             [f.label_ids for f in features], dtype=torch.long
         )
+        all_example_guids = [f.example_guid for f in features]
 
-        eval_dataset = TensorDataset(
+        # initialize a wrapper class that also returns the indices
+        eval_dataset = TensorDatasetWithIndices(TensorDataset)
+
+        # use wrapper class so eval_dataset returns index, (tuple of tensors)
+        eval_dataset = eval_dataset(
             all_input_ids, all_input_mask, all_segment_ids, all_label_ids
         )
         eval_sampler = SequentialSampler(eval_dataset)
@@ -238,8 +273,9 @@ class Transformer(object):
 
         logits = None
         out_label_ids = None
+        out_guids = []
 
-        for batch in eval_dataloader:
+        for i, batch in eval_dataloader:
             batch = tuple(t.to(self.device) for t in batch)
 
             with torch.no_grad():
@@ -260,6 +296,7 @@ class Transformer(object):
 
             # extract output predictions (logits) as a numpy array
             # N_BATCHES x N_SEQ_LENGTH x N_LABELS
+            out_guids.extend([all_example_guids[g] for g in i])
             if logits is None:
                 logits = batch_logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
@@ -274,13 +311,16 @@ class Transformer(object):
                 )
 
         # re-align the predictions with the original text
-        preds, offsets, lengths = [], [], []
+        outputs = {}
         for f, feature in enumerate(features):
+            guid = out_guids[f]
+            if guid not in outputs:
+                outputs[guid] = {'pred': [], 'start': [], 'length': []}
             idxKeep = np.where(out_label_ids[f, :] != -100)[0]
             # get predictions for only the kept labels
-            preds.append(logits[f, idxKeep, :])
+            outputs[guid]['pred'].append(logits[f, idxKeep, :])
             # get offsets for only the kept labels
-            offsets.extend(
+            outputs[guid]['start'].extend(
                 [
                     x
                     for i, x in enumerate(feature.input_offsets) if i in idxKeep
@@ -294,27 +334,50 @@ class Transformer(object):
                     # cumulatively sums lengths for subwords until the first subword token
                     feature_lengths[i - 1] += feature_lengths[i]
 
-            lengths.extend(
+            outputs[guid]['length'].extend(
                 [x for i, x in enumerate(feature_lengths) if i in idxKeep]
             )
 
-        preds = np.concatenate(preds, axis=0)
+        for guid in outputs:
+            outputs[guid]['pred'] = np.concatenate(
+                outputs[guid]['pred'], axis=0
+            )
 
-        # now, we may have multiple predictions for the same offset token
-        # this can happen as we are overlapping observations to maximize
-        # context for tokens near the window edges
-        # so we take the *last* prediction, because that prediction will have
-        # the most context
+            # now, we may have multiple predictions for the same offset token
+            # this can happen as we are overlapping observations to maximize
+            # context for tokens near the window edges
+            # so we take the *last* prediction, because that prediction will have
+            # the most context
 
-        # np.unique returns index of first unique value, so reverse the list
-        offsets.reverse()
-        _, unique_idx = np.unique(offsets, return_index=True)
-        unique_idx = len(offsets) - unique_idx - 1
-        offsets.reverse()
+            # np.unique returns index of first unique value, so reverse the list
+            outputs[guid]['start'].reverse()
+            _, unique_idx = np.unique(outputs[guid]['start'], return_index=True)
+            unique_idx = len(outputs[guid]['start']) - unique_idx - 1
+            outputs[guid]['start'].reverse()
 
-        # align the predictions with the text offsets
-        offsets = [x for i, x in enumerate(offsets) if i in unique_idx]
-        lengths = [x for i, x in enumerate(lengths) if i in unique_idx]
-        preds = preds[unique_idx, :]
+            # align the predictions with the text offsets
+            outputs[guid]['start'] = [
+                x
+                for i, x in enumerate(outputs[guid]['start']) if i in unique_idx
+            ]
+            outputs[guid]['length'] = [
+                x for i, x in enumerate(outputs[guid]['length'])
+                if i in unique_idx
+            ]
+            outputs[guid]['pred'] = outputs[guid]['pred'][unique_idx, :]
 
-        return preds, lengths, offsets
+        # create output as list which aligns with input
+        pred, length, start = [], [], []
+        for example in examples:
+            guid = example.guid
+            pred.append(outputs[guid]['pred'])
+            length.append(outputs[guid]['length'])
+            start.append(outputs[guid]['start'])
+
+        return pred, length, start
+
+    def predict_text(self, text_string, **kwargs):
+        output = self.predict([text_string], **kwargs)
+
+        # un-nest the list
+        return (o[0] for o in output)

@@ -882,10 +882,7 @@ def main():
         args.data_type, args.bio, transform=args.label_transform
     )
     num_labels = len(label_set.label_list)
-    processor = processors.DeidProcessor(
-        args.data_dir,
-        label_set
-    )
+    processor = processors.DeidProcessor(args.data_dir, label_set)
     # Use cross entropy ignore index as padding label id so
     # that only real label ids contribute to the loss later
     pad_token_label_id = CrossEntropyLoss().ignore_index

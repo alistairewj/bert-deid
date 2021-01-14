@@ -38,6 +38,7 @@ class InputFeatures(object):
     """Features are directly input to the transformer model."""
     def __init__(
         self,
+        example_guid,
         input_ids,
         input_mask,
         segment_ids,
@@ -46,6 +47,7 @@ class InputFeatures(object):
         input_offsets=None,
         input_lengths=None
     ):
+        self.example_guid = example_guid
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
@@ -434,6 +436,7 @@ def convert_examples_to_features(
 
             features.append(
                 InputFeatures(
+                    example_guid=example.guid,
                     input_ids=input_ids,
                     input_mask=input_mask,
                     segment_ids=segment_ids,
