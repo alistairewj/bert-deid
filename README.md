@@ -21,51 +21,33 @@ export MODEL_DIR="bert_deid_model"
 bert_deid download
 ```
 
-## Usage (Shell)
+## Usage
 
-From the command line, we can call `bert_deid` to apply it to any given text:
-
-```sh
-export MODEL_DIR="bert_deid_model"
-bert_deid apply --text "hello dr. somayah"
-```
-
-Text can also be piped to `bert_deid`. Alternatively, the `--text_dir` argument allows running the package on all files in a folder:
-
-```sh
-mkdir tmp
-echo "hello dr. somayah" > tmp/example1.txt
-echo "No pneumothorax since 2019-01-01." > tmp/example2.txt
-bert_deid apply --text_dir tmp
-```
-
-Deidentified files are output with the `.deid` extension, e.g. `tmp/example1.txt` would become `tmp/example1.txt.deid`.
-
-## Usage (Python)
-
-The model can also be imported and used directly within Python.
+The model can be imported and used directly within Python.
 
 ```python
 from bert_deid.model import Transformer
 
 # load in a trained model
-model_path = '/data/models/bert-i2b2-2014'
+model_path = 'bert_deid_model'
 deid_model = Transformer(model_path)
 
-text = 'Dr. Somayah says I have had a pneumothorax since 2019-01-01.'
+with open('tests/example_note.txt', 'r') as fp:
+    text = ''.join(fp.readlines())
+
 print(deid_model.apply(text, repl='___'))
 
 # we can also get the original predictions
-preds, lengths, offsets = deid_model.predict(text)
+preds = deid_model.predict(text)
 
 # print out the identified entities
-for p in range(preds.shape[0]):
-    start, stop = offsets[p], offsets[p] + lengths[p]
+for p, pred in enumerate(preds):
+    prob = pred[0]
+    label = pred[1]
+    start, stop = pred[2:]
 
-    # most likely prediction
-    idxMax = preds[p].argmax()
-    label = deid_model.label_set.id_to_label[idxMax]
-    print(f'{text[start:stop]:15s} {label}')
+    # print the prediction labels out
+    print(f'{text[start:stop]:15s} {label} ({prob:0.3f})')
 ```
 
 ## Training and evaluating a transformer model
@@ -114,7 +96,7 @@ Activate the environment:
 Train a model (e.g. BERT):
 
 ```sh
-python scripts/train_transformer.py --data_dir /data/deid-gs/i2b2_2014 --data_type i2b2_2014 --model_type bert --model_name_or_path bert-base-uncased --do_lower_case --output_dir /data/models/bert-model-i2b2-2014 --do_train --overwrite_output_dir
+python scripts/train_ner.py --data_dir /data/deid-gs/i2b2_2014 --data_type i2b2_2014 --model_type bert --model_name_or_path bert-base-uncased --do_lower_case --output_dir /data/models/bert-model-i2b2-2014 --do_train --overwrite_output_dir
 ```
 
 Note this will only use data from the `train` subfolder of the `--data_dir` arg. Once the model is trained it can be used as above.
