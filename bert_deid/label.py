@@ -148,6 +148,22 @@ LABEL_MEMBERSHIP = {
         ]
 }
 
+PYDEID_FEATURE2LABEL = {
+    'age': 'AGE',
+    'date': 'DATE',
+    'email': 'CONTACT',
+    'idnum': 'ID',
+    'initials': 'NAME',
+    'location': 'LOCATION',
+    'mrn': 'ID',
+    'name': 'NAME',
+    'pager': 'ID',
+    'ssn': 'ID',
+    'telephone': 'CONTACT',
+    'unit': 'ID',
+    'url': 'CONTACT'
+}
+
 
 # convert the lists within each dictionary to a dict
 def create_label_map(LABEL_MEMBERSHIP):
@@ -211,7 +227,6 @@ class LabelCollection(object):
             'binary' - one label category: 'PHI' (non-PHI will become 'O')
     """
     def __init__(self, data_type, bio=None, transform=None):
-        self.labels = None
         self.bio = bio
         self.transform = transform
 
@@ -255,6 +270,7 @@ class LabelCollection(object):
 
         # now make label_list immutable
         self.label_list = tuple(self.label_list)
+        self.labels = self.label_list
 
         # map labels to IDs
         self.label_to_id = {label: i for i, label in enumerate(self.label_list)}
@@ -296,7 +312,8 @@ class LabelCollection(object):
             ]
 
         # transform the labels as appropriate
-        self.transform_labels()
+        if len(self.labels) > 0:
+            self.transform_labels()
 
     def from_list(self, labels):
         self.labels = labels
@@ -307,7 +324,8 @@ class LabelCollection(object):
                 )
 
         # transform the labels if the user has requested it
-        self.transform_labels()
+        if len(self.labels) > 0:
+            self.transform_labels()
 
     def sort_labels(self):
         if self.labels is not None:

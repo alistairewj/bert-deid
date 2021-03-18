@@ -5,7 +5,6 @@ import os
 import re
 import string
 import csv
-from copy import deepcopy
 import glob
 import argparse
 import logging
@@ -20,7 +19,11 @@ from sklearn.metrics import classification_report
 from bert_deid import processors
 from bert_deid.label import LABEL_SETS, LABEL_MEMBERSHIP, LabelCollection
 from bert_deid import utils
-"""
+s
+import json
+from bert_deid.label import PYDEID_FEATURE2LABEL
+from tokenizer import get_tokens
+import string
 Runs BERT deid on a set of text files.
 Evaluates the output (matched correct PHI categories) using gold standard annotations.
 
@@ -148,7 +151,28 @@ def token_eval(phi_tokens, all_labels, is_expand):
     return tp_list, false_list
 
 
-def merge_BIO_pred(anno, is_binary, is_expand, text):
+def token_type_eval(
+    phi_token_true, tp_list, fp_list, fn_list, id2label_map, curr_performance
+):
+    def count_freq(lis, label):
+        count = 0
+        for _, l, _, _ in lis:
+            if label == l:
+                count += 1
+        return count
+
+    for idval in id2label_map.keys():
+        curr_performance['n_{}_token_phi'.format(id2label_map[idval])
+                        ] = count_freq(phi_token_true, idval)
+        curr_performance['n_{}_token_tp'.format(id2label_map[idval])
+                        ] = count_freq(tp_list, idval)
+        curr_performance['n_{}_token_fp'.format(id2label_map[idval])
+                        ] = count_freq(fp_list, idval)
+        curr_performance['n_{}_token_fn'.format(id2label_map[idval])
+                        ] = count_freq(fn_list, idval)
+
+
+def merge_BIO_pred(anno, is_binary, is_expand, text, label2id_map):
     sort_by_start = anno.sort_values("start")
     # find starting row index for each PHI predicted
     entity_starts = []
@@ -195,7 +219,7 @@ def merge_BIO_pred(anno, is_binary, is_expand, text):
                 "stop": stop,
                 "entity": entity,
                 "entity_type": entity_type,
-                "cooment": ""
+                "comment": ""
             },
             ignore_index=True
         )
@@ -205,13 +229,6 @@ def merge_BIO_pred(anno, is_binary, is_expand, text):
 
 def main():
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--model_dir",
-        required=True,
-        type=str,
-        help="Path to the model (used to define label set).",
-    )
 
     parser.add_argument(
         "--pred_path",
@@ -228,7 +245,10 @@ def main():
     )
 
     parser.add_argument(
-        "--ref_path", required=True, type=str, help="Gold standard labels"
+        "--text_path",
+        required=True,
+        type=str,
+        help="Path for de-identified text"
     )
 
     parser.add_argument(
@@ -246,9 +266,15 @@ def main():
     )
 
     parser.add_argument(
-        "--binary",
+        "--binary_eval",
         action="store_true",
-        help="Do binary evaluation (PHI or not)"
+        help="Do binary evaluation, phi instances or not"
+    )
+
+    parser.add_argument(
+        "--multi_eval",
+        action="store_true",
+        help="Multi NER evaluation, correct phi instances or not"
     )
 
     parser.add_argument(
@@ -257,6 +283,17 @@ def main():
         help="Enable more freedom in evalution, as if any individual \
         character is flagged as a phi instance, whole token would be flagged \
             as phi instance"
+    )
+
+    parser.add_argument(
+        "--data_type",
+        default=None,
+        type=str,
+        required=True,
+        choices=LABEL_SETS,
+        help="The input dataset type. Valid choices: {}.".format(
+            ', '.join(LABEL_SETS)
+        ),
     )
 
     # label transformations
@@ -278,6 +315,19 @@ def main():
         type=str,
         default=None,
         help="CSV file to output errors for labelling"
+    )
+    parser.add_argument(
+        "--stats",
+        type=str,
+        default=None,
+        help="CSV file for result performance"
+    )
+    # how to group text for evaluation
+    parser.add_argument(
+        '--tokenizer',
+        type=str,
+        default='space',
+        help='Regex pattern to split text into tokens for eval.'
     )
 
     args = parser.parse_args()
@@ -303,6 +353,20 @@ def main():
                 ["False Positives Token", ''], ['False Positives Entity', '']
             ]
         )
+    stats_path = None
+    if args.stats is not None:
+        stats_path = Path(args.stats)
+        if not os.path.exists(log_path.parents[0]):
+            os.makedirs(stats_path.parents[0])
+
+    if args.tokenizer == 'space':
+        tokenizer = utils.split_by_space
+    elif args.tokenizer == 'space_and_punc':
+        tokenizer = utils.split_by_space_punctuation
+    elif args.tokenizer == 'nltk':
+        tokenizer = utils.split_by_nltk
+    else:
+        raise ValueError('Invalid tokenizer name')
 
     input_ext = '.txt'
     gs_ext = args.ref_extension
@@ -312,15 +376,24 @@ def main():
     if not pred_ext.startswith('.'):
         pred_ext = '.' + pred_ext
 
-    label_set = torch.load(os.path.join(args.model_dir, 'label_set.bin'))
+    label_set = LabelCollection(
+        data_type=args.data_type, bio=args.bio, transform=args.label_transform
+    )
 
     # get the label to ID map from the label set
-    if args.binary:
-        label2id_map = {'O': 0, 'PHI': 1}
-    else:
-        label2id_map = label_set.label_to_id
-
+    label2id_map = label_set.label_to_id
+    if args.bio:
+        new_label2id_map = {'O': 0}
+        for label in label2id_map.keys():
+            if label != 'O':
+                new_label = label[2:]
+                if new_label not in new_label2id_map:
+                    new_label2id_map[new_label] = len(new_label2id_map)
+        label2id_map = new_label2id_map
+    if args.binary_eval:
+        label2id_map = {'O': 0, 'phi': 1}
     id2label_map = {label2id_map[key]: key for key in label2id_map}
+
     label_list = list(label2id_map.keys())
     label_list.remove('O')
 
@@ -342,11 +415,15 @@ def main():
     if args.bio:
         is_bio += 'with BIO scheme transformation on label'
 
-    if args.binary:
-        logger.info("***** Running binary evaluation {} *****".format(is_bio))
-    else:
+    if args.binary_eval and not args.multi_eval:
+        logger.info("***** Running binary evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer))
+    elif args.multi_eval and not args.binary_eval:
         logger.info(
-            "***** Running multi-class evaluation {} *****".format(is_bio)
+            "***** Running multi-class evaluation {} with {} tokenizer *****".format(is_bio, args.tokenizer)
+        )
+    else:
+        raise ValueError(
+            "Invalid input arguments, either binary or multi-class evaluation"
         )
 
     logger.info(" Num examples = %d", len(input_files))
@@ -369,11 +446,26 @@ def main():
 
         # load output of bert-deid
         fn_pred = pred_path / f'{fn}{pred_ext}'
-        pred_label_set.from_csv(fn_pred)
-
+        df = pd.read_csv(
+            fn_pred,
+            header=0,
+            delimiter=",",
+            dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
         # load ground truth
         gs_fn = ref_path / f'{fn}{gs_ext}'
-        gs_label_set.from_csv(gs_fn)
+        gs = pd.read_csv(
+            gs_fn,
+            header=0,
+            delimiter=",",
+            dtype={
+                'entity': str,
+                'entity_type': str
+            }
+        )
 
         # convert start:end PHIs to list of ints representing different PHIs
         text_tar = np.zeros(len(text), dtype=int)
@@ -384,16 +476,45 @@ def main():
             if args.binary:
                 text_tar[start:stop] = 1
             else:
-                text_tar[start:stop] = gs_label_set.label_to_id[entity_type]
-
+                if args.label_transform is not None:
+                    transformed_label = LABEL_MAP[args.label_transform][
+                        row['entity_type'].upper()]
+                    text_tar[row['start']:row['stop']] = label2id_map[
+                        transformed_label]
+                else:
+                    text_tar[row['start']:row['stop']] = label2id_map[
+                        row['entity_type']]
         text_pred = np.zeros(len(text), dtype=int)
-        for i, label in enumerate(pred_label_set.labels):
-            start, stop = label.start, label.start + label.length
-            entity_type = label.entity_type
-            if args.binary:
-                text_pred[start:stop] = 1
+        for i, row in df.iterrows():
+            if args.bio:
+                if (
+                    'B-' not in row['entity_type'] and
+                    'I-' not in row['entity_type']
+                ) and row['entity_type'].lower() != 'phi':
+                    entity_type = row['entity_type']
+                if (
+                    'B-' in row['entity_type'].upper() or
+                    'I-' in row['entity_type'].upper()
+                ):
+                    entity_type = row['entity_type'][
+                        2:]  # remove b- or i-, don't care for char eval
             else:
-                text_pred[start:stop] = label2id_map[entity_type]
+                if ('B-' in row['entity_type'] or 'I-' in row['entity_type']):
+                    entity_type = row['entity_type'][2:]
+                else:
+                    entity_type = row['entity_type']
+            if args.binary_eval:
+                text_pred[row['start']:row['stop']] = 1
+            else:
+                try:
+                    text_pred[row['start']:row['stop']] = label2id_map[
+                        entity_type.upper()]
+                except KeyError:
+                    # transform pydeid feature to correponding label
+                    transformed_label = PYDEID_FEATURE2LABEL[entity_type.lower()
+                                                            ]
+                    text_pred[row['start']:row['stop']] = label2id_map[
+                        transformed_label]
 
         curr_performance = {}
         curr_performance['n_char'] = len(text)
@@ -411,14 +532,26 @@ def main():
         phi_tokens_true, phi_tokens_pred = [], []
         n_tokens = 0
 
-        # find phi tokens split by whitespace
-        # resolve conflicted-label token by splitting on conflict
-        for token, start, end in utils.split_by_space(text):
+        # find phi tokens split by specified tokenization scheme
+        for token, start, end in tokenizer(text):
             n_token, token_y = find_phi_tokens(token, start, end, text_tar)
-            n_tokens += n_token
-            phi_tokens_true.extend(token_y)
+
+            new_n_token = 0
+            new_token_y = []
+            # punctuation alone does not contribute to PHI tokens
+            for t in token_y:
+                if t[0] not in string.punctuation:
+                    new_n_token += 1
+                    new_token_y.append(t)
+
+            n_tokens += new_n_token
+            phi_tokens_true.extend(new_token_y)
             _, token_ypred = find_phi_tokens(token, start, end, text_pred)
-            phi_tokens_pred.extend(token_ypred)
+            new_token_ypred = []
+            for t in token_ypred:
+                if t[0] not in string.punctuation:
+                    new_token_ypred.append(t)
+            phi_tokens_pred.extend(new_token_ypred)
 
             true_label, pred_label = token_info(
                 token, start, end, text_tar, text_pred, id2label_map
@@ -437,13 +570,21 @@ def main():
         curr_performance['n_token_tp'] = len(tp_list)
         curr_performance['n_token_fp'] = len(fp_list)
         curr_performance['n_token_fn'] = len(fn_list)
+        if args.multi_eval:
+            token_type_eval(
+                phi_tokens_true, tp_list, fp_list, fn_list, id2label_map,
+                curr_performance
+            )
 
         fp_list_entity, fn_list_entity = None, None
         # report performance entity-wise (only when label is transformed)
         if args.bio:
-            df = merge_BIO_pred(df, args.binary, args.expand_eval, text)
-            if args.binary:
+            df = merge_BIO_pred(
+                df, args.binary_eval, args.expand_eval, text, label2id_map
+            )
+            if args.binary_eval:
                 gs['entity_type'] = 'phi'
+                df['entity_type'] = 'phi'
             # ignore punctuation punshiment at front/end
             true = utils.ignore_partials(utils.get_entities(gs))
             pred = utils.ignore_partials(utils.get_entities(df))
@@ -493,7 +634,12 @@ def main():
                     log_text[key] += "\n"
                     if (',' in token) or ("\n" in token) or ('"' in token):
                         token = '"' + token.replace('"', '""') + '"'
-                    label = id2label_map[label]
+
+                    if args.multi_eval:
+                        if type(label) != str:
+                            label = id2label_map[label]
+                        elif type(label) == str and label not in label2id_map.keys():
+                            label = LABEL_MAP[args.label_transform][label.upper()]
                     log_text[key] += f'{fn},,{start},{stop},{token},{label},\n'
 
         perf_all[fn] = curr_performance
@@ -503,7 +649,7 @@ def main():
     # convert to dataframe
     df = pd.DataFrame.from_dict(perf_all, orient='index')
 
-    print(df)
+    #print (df)
     # print ("\nFalse negatives:")
     # for fn in fn_all:
     #     print (fn)
@@ -512,27 +658,88 @@ def main():
     #     print (fp)
     # print('\n')
 
+    final_stats = {}
     # summary stats
-    se, ppv, f1 = utils.compute_stats(df, True, False)
-    print(f'Token Macro Se: {se.mean():0.4f}')
-    print(f'Token Macro P+: {ppv.mean():0.4f}')
-    print(f'Token Macro F1: {f1.mean():0.4f}')
+    if args.binary_eval:
+        n_token_phi = sum(df['n_token_phi'])
+        n_token_tp, n_token_fp, n_token_fn = sum(df['n_token_tp']), sum(df['n_token_fp']), sum(df['n_token_fn'])
+        print (f'Number of PHI tokens: {n_token_phi}')
+        print (f'Tokens: TP:{n_token_tp}, FN:{n_token_fn}, FP:{n_token_fp}')
 
-    se, ppv, f1 = utils.compute_stats(df, True, True)
-    print(f'Token Micro Se: {se.mean():0.4f}')
-    print(f'Token Micro P+: {ppv.mean():0.4f}')
-    print(f'Token Micro F1: {f1.mean():0.4f}')
+        se, ppv, f1 = utils.compute_stats(df, token_eval=True, average='macro')
+        # print(f'Token Macro Se: {se.mean():0.4f}')
+        # print(f'Token Macro P+: {ppv.mean():0.4f}')
+        # print(f'Token Macro F1: {f1.mean():0.4f}')
+        final_stats['token_macro'] = [
+            round(se.mean(), 4),
+            round(ppv.mean(), 4),
+            round(f1.mean(), 4)
+        ]
+
+        se, ppv, f1 = utils.compute_stats(df, token_eval=True, average='micro')
+        print(f'Token Micro Se: {se.mean():0.4f}')
+        print(f'Token Micro P+: {ppv.mean():0.4f}')
+        print(f'Token Micro F1: {f1.mean():0.4f}')
+        final_stats['token_micro'] = [
+            round(se.mean(), 4),
+            round(ppv.mean(), 4),
+            round(f1.mean(), 4)
+        ]
+
+    if args.multi_eval:
+        total_tp, total_fn, total_fp = 0, 0, 0
+        for label in label_list:
+            total_tp += sum(df[f'n_{label}_token_tp'])
+            total_fn += sum(df[f'n_{label}_token_fn'])
+            total_fp += sum(df[f'n_{label}_token_fp'])
+            se, ppv, f1 = utils.compute_stats(
+                df, token_eval=True, average='micro', label=label
+            )
+            print(f'Label {label}')
+            n_label_phi = sum(df[f'n_{label}_token_phi'])
+            n_label_fn = sum(df[f'n_{label}_token_fn'])
+            n_label_fp = sum(df[f'n_{label}_token_fp'])
+            print (f'Number of Label PHI {n_label_phi}')
+            print (f'FN: {n_label_fn}, FP: {n_label_fp}')
+            print(f'Token Micro Se: {se.mean():0.4f}')
+            print(f'Token Micro P+: {ppv.mean():0.4f}')
+            print(f'Token Micro F1: {f1.mean():0.4f}')
+            final_stats[f'Token Micro {label}'] = [
+                round(se.mean(), 4),
+                round(ppv.mean(), 4),
+                round(f1.mean(), 4)
+            ]
+        
+        print ("Multi Evaluation Overall")
+        se = total_tp / (total_tp + total_fn)
+        ppv = total_tp / (total_tp + total_fp)
+        f1 = 2 * se * ppv / (se + ppv)
+        print (f'Token Micro Se: {se:0.4f}')
+        print (f'Token Micro P+: {ppv:0.4f}')
+        print (f'Token Micro F1: {f1:0.4f}')
+
+    if stats_path is not None:
+        final_stats = pd.DataFrame.from_dict(
+            final_stats, orient='index', columns=['Se', 'P+', 'F1']
+        )
+        final_stats.to_csv(stats_path)
 
     if args.bio:
-        se, ppv, f1 = utils.compute_stats(df, False, False)
-        print(f'Entity Macro Se: {se.mean():0.4f}')
-        print(f'Entity Macro P+: {ppv.mean():0.4f}')
-        print(f'Entity Macro F1: {f1.mean():0.4f}')
+        if args.binary_eval: 
+            n_entity_phi = sum(df['n_entity_phi'])
+            n_entity_tp, n_entity_fp, n_entity_fn = sum(df['n_entity_tp']), sum(df['n_entity_fp']), sum(df['n_entity_fn'])
+            print (f'Number of PHI Entity: {n_entity_phi}')
+            print (f'Entity: TP:{n_entity_tp}, FN:{n_entity_fn}, FP:{n_entity_fp}')
+        # also perform entity evaluation
+        se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='macro')
+        # print(f'Entity Macro Se: {se.mean():0.4f}')
+        # print(f'Entity Macro P+: {ppv.mean():0.4f}')
+        # print(f'Entity Macro F1: {f1.mean():0.4f}')
 
-        se, ppv, f1 = utils.compute_stats(df, False, True)
-        print(f'Entity Micro Se: {se.mean():0.4f}')
-        print(f'Entity Micro P+: {ppv.mean():0.4f}')
-        print(f'Entity Micro F1: {f1.mean():0.4f}')
+        se, ppv, f1 = utils.compute_stats(df, token_eval=False, average='micro')
+        # print(f'Entity Micro Se: {se.mean():0.4f}')
+        # print(f'Entity Micro P+: {ppv.mean():0.4f}')
+        # print(f'Entity Micro F1: {f1.mean():0.4f}')
 
     if log_path is not None:
         # overwrite the log file
@@ -542,16 +749,6 @@ def main():
 
     if csv_path is not None:
         df.to_csv(csv_path)
-
-    print('length', len(true_labels))
-    print('n phi tokens: ', sum(df['n_token_phi']))
-    tokens_report = classification_report(
-        true_labels, pred_labels, labels=label_list, digits=4
-    )
-    print("**** token report *****")
-    print(tokens_report)
-    # with open('/home/jingglin/research/data/pred/i2b2_2014/token_log/test/token_report.json', 'w') as json_file:
-    #     json.dumps(tokens_report, sort_keys=True, indent=4, separators=(',', ': '))
 
 
 if __name__ == "__main__":

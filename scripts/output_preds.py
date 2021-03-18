@@ -13,7 +13,18 @@ from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP
 from tqdm import tqdm
 import torch
 
+# use pydeid for adding extra feature
+import pydeid
 import pkgutil
+
+from pydeid.annotators import _patterns
+# load all modules on path
+pkg = 'pydeid.annotators._patterns'
+PATTERN_NAMES = [
+    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
+]
+PATTERN_NAMES.remove('_pattern')
+_PATTERN_NAMES = PATTERN_NAMES + ['all']
 
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
@@ -36,6 +47,16 @@ if __name__ == '__main__':
         default='/enc_data/models/bert-i2b2-2014',
         type=str,
         help="Path to the model.",
+    )
+    parser.add_argument(
+        "--model_type", default='bert', type=str, help="Type of model"
+    )
+    parser.add_argument(
+        "--task",
+        default='i2b2_2014',
+        type=str,
+        choices=LABEL_SETS,
+        help=f"Type of dataset: {', '.join(LABEL_SETS)}.",
     )
     parser.add_argument(
         "--output",
@@ -80,9 +101,17 @@ if __name__ == '__main__':
             f = f.lower()
             args.patterns.append(f)
 
+    if 'all' in args.patterns:
+        args.patterns = PATTERN_NAMES
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # load in a trained model
     transformer = Transformer(
-        args.model_dir, device='cpu', patterns=args.patterns
+        args.model_type,
+        args.model_dir,
+        max_seq_length=128,
+        device=device,
+        patterns=args.patterns
     )
 
     label_to_id = transformer.label_set.label_to_id
@@ -108,12 +137,18 @@ if __name__ == '__main__':
     lengths = []
     offsets = []
     labels = []
-
+    num_subwords = 0
+    num_tokens = 0
     for f in tqdm(files, total=len(files), desc='Files'):
         with open(data_path / 'txt' / f, 'r') as fp:
             text = ''.join(fp.readlines())
 
-        ex_preds, ex_lengths, ex_offsets = transformer.predict(text)
+        ex_preds, ex_lengths, ex_offsets, num_subwords, num_tokens = transformer.predict(
+            text,
+            document_id=f[:-4],
+            num_subwords=num_subwords,
+            num_tokens=num_tokens
+        )
 
         if preds is None:
             preds = ex_preds
@@ -129,7 +164,7 @@ if __name__ == '__main__':
                 for i in range(ex_preds.shape[0]):
                     start, stop = ex_offsets[i], ex_offsets[i] + ex_lengths[i]
                     entity = text[start:stop]
-                    if args.model_type == 'bert_crf':
+                    if args.model_type == 'bert_crf' or args.model_type == 'bert_extra_feature_crf':
                         assert (len(ex_preds[i, :]) == 1)
                         # BertCRF gives one predicted tag id: (batch_size, max_seq_len, 1)
                         entity_type = transformer.label_set.id_to_label[int(
@@ -170,5 +205,8 @@ if __name__ == '__main__':
         labels.extend(label_tokens)
         """
 
+    print(
+        f'Number of subwords: {num_subwords} out of number of tokens {num_tokens}'
+    )
     # with open(args.output, 'wb') as fp:
     #     pickle.dump([files, preds, labels, lengths, offsets], fp)

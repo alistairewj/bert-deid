@@ -5,7 +5,7 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 import argparse
-import pkgutil 
+import pkgutil
 import pydeid
 import numpy as np
 import re
@@ -20,9 +20,9 @@ from bert_deid.label import LabelCollection, LABEL_SETS, LABEL_MEMBERSHIP, LABEL
 from pydeid.annotators import _patterns
 # load all modules on path
 pkg = 'pydeid.annotators._patterns'
-PATTERN_NAMES = [name for _, name, _ in pkgutil.iter_modules(
-    _patterns.__path__
-)]
+PATTERN_NAMES = [
+    name for _, name, _ in pkgutil.iter_modules(_patterns.__path__)
+]
 PATTERN_NAMES.remove('_pattern')
 _PATTERN_NAMES = PATTERN_NAMES + ['all']
 
@@ -59,17 +59,14 @@ if __name__ == '__main__':
         help="The prediction dir.",
     )
     parser.add_argument(
-        "--data_type",
-        default=None,
-        type=str,
-        required=True,
-        help="data type"
+        "--data_type", default=None, type=str, required=True, help="data type"
     )
     parser.add_argument(
         "--output_folder",
         default=None,
         type=str,
-        help="Output folder for PHI in each file that are not predicted by model",
+        help=
+        "Output folder for PHI in each file that are not predicted by model",
     )
     parser.add_argument(
         "--output_csv",
@@ -119,17 +116,14 @@ if __name__ == '__main__':
         output_folder = Path(args.output_folder)
         if not output_folder.exists():
             output_folder.mkdir(parents=True)
-        output_header = ['document_id','start', 'stop', 'token', 'token_type']
+        output_header = ['document_id', 'start', 'stop', 'token', 'token_type']
     else:
         output_folder = None
-        
 
     if args.output_csv is not None:
         output_csv = Path(args.output_csv)
         if not os.path.exists(output_csv.parents[0]):
             os.makedirs(output_csv.parents[0])
-
-
 
     # read files from folder
     if os.path.exists(args.text_path):
@@ -138,29 +132,30 @@ if __name__ == '__main__':
 
         # remove extension and get file list
         input_files = set(
-            [f[0:-len(args.input_ext)] for f in files if f.endswith(args.input_ext)]
+            [
+                f[0:-len(args.input_ext)]
+                for f in files if f.endswith(args.input_ext)
+            ]
         )
 
         input_files = sorted(list(input_files))
     else:
         raise ValueError('Input folder %s does not exist.', args.text_path)
 
-
     label_set = LabelCollection(
         args.data_type, bio=args.bio, transform=args.label_transform
     )
-    processor = processors.DeidProcessor(
-        args.data_dir,
-        label_set
-    )
-    
+    processor = processors.DeidProcessor(args.data_dir, label_set)
+
     labels = processor.label_set.label_list
     label2id = processor.label_set.label_to_id
     # invert the mapping from label to ID
     id2label = {i: label for label, i in label2id.items()}
 
-    df_all =  pd.DataFrame(columns=['document_id', 'n_token', 'n_token_phi'] + 
-    list(labels[1:]) + ['total_tp','total_fp', 'total_fn', 're', 'p+', 'F1'])
+    df_all = pd.DataFrame(
+        columns=['document_id', 'n_token', 'n_token_phi'] + list(labels[1:]) +
+        ['total_tp', 'total_fp', 'total_fn', 're', 'p+', 'F1']
+    )
     # keep track of all PHI tokens in this dataset
     for fn in tqdm(input_files, total=len(input_files)):
         # load the text
@@ -175,7 +170,6 @@ if __name__ == '__main__':
                 'entity_type': str
             }
         )
-
 
         # load ground truth
         gs_fn = ref_path / f'{fn}{args.gs_ext}'
@@ -196,7 +190,6 @@ if __name__ == '__main__':
                 entity_type = LABEL_MAP[args.label_transform][entity_type]
 
             text_tar[row['start']:row['stop']] = label2id[entity_type]
-    
 
         # binary vector indicating if predicted as phi
         text_pred = np.zeros(len(text), dtype=bool)
@@ -204,7 +197,9 @@ if __name__ == '__main__':
             text_pred[row['start']:row['stop']] = True
 
         # report performance token wise
-        curr_fn = pd.DataFrame(columns=['document_id','start', 'stop', 'token', 'token_type'])
+        curr_fn = pd.DataFrame(
+            columns=['document_id', 'start', 'stop', 'token', 'token_type']
+        )
 
         pattern = re.compile(r'\s')
         n_tokens = 0
@@ -223,29 +218,34 @@ if __name__ == '__main__':
                     token_tar = text_tar[i]
                 if text_pred[i]:
                     token_pred = True
-                    
+
             if token_tar != 0:
                 n_tokens_phi += 1
 
             # only get detailed stats for false negative here
             if token_tar != 0 and not token_pred:
                 n_tokens_fn += 1
-                curr_fn = curr_fn.append({
-                    'document_id':fn, 'start': start, 
-                    'stop':end, 'token':token,'token_type':id2label[token_tar]}, 
-                    ignore_index=True)
+                curr_fn = curr_fn.append(
+                    {
+                        'document_id': fn,
+                        'start': start,
+                        'stop': end,
+                        'token': token,
+                        'token_type': id2label[token_tar]
+                    },
+                    ignore_index=True
+                )
 
             elif token_tar == 0 and token_pred:
                 n_tokens_fp += 1
-            
+
             elif token_tar != 0 and token_pred:
                 n_tokens_tp += 1
-                
-                
+
         if output_folder is not None:
             curr_fn.to_csv(output_folder / f'{fn}.csv', index=False)
-            
-        df_current = {label:0 for label in labels[1:]}
+
+        df_current = {label: 0 for label in labels[1:]}
         df_current['document_id'] = fn
         for i, row in curr_fn.iterrows():
             label = row['token_type']
@@ -258,38 +258,46 @@ if __name__ == '__main__':
         if n_tokens_tp + n_tokens_fn == 0:
             df_current['re'] = 1.0
         else:
-            df_current['re'] = round(n_tokens_tp/(n_tokens_tp + n_tokens_fn), 4)
+            df_current['re'] = round(
+                n_tokens_tp / (n_tokens_tp + n_tokens_fn), 4
+            )
         if n_tokens_tp + n_tokens_fp == 0:
             df_current['p+'] = 1.0
         else:
-            df_current['p+'] = round(n_tokens_tp/(n_tokens_tp + n_tokens_fp), 4)
+            df_current['p+'] = round(
+                n_tokens_tp / (n_tokens_tp + n_tokens_fp), 4
+            )
 
-        if df_current['re']+df_current['p+'] == 0:
+        if df_current['re'] + df_current['p+'] == 0:
             df_current['F1'] = 0.0
         else:
-            df_current['F1'] = round(2*(df_current['re']*df_current['p+'])/(df_current['re']+df_current['p+']), 4)
+            df_current['F1'] = round(
+                2 * (df_current['re'] * df_current['p+']) /
+                (df_current['re'] + df_current['p+']), 4
+            )
         df_all = df_all.append(df_current, ignore_index=True)
-        
+
     df_total_stats = {'document_id': 'All'}
     for label in labels[1:]:
         df_total_stats[label] = sum(df_all[label])
-    df_total_stats['n_token']= sum(df_all['n_token'])
+    df_total_stats['n_token'] = sum(df_all['n_token'])
     df_total_stats['n_token_phi'] = sum(df_all['n_token_phi'])
     df_total_stats['total_fn'] = sum(df_all['total_fn'])
     df_total_stats['total_fp'] = sum(df_all['total_fp'])
     df_total_stats['total_tp'] = sum(df_all['total_tp'])
-    df_total_stats['re'] = round(df_total_stats['total_tp']/(df_total_stats['total_tp'] + df_total_stats['total_fn']), 4)
-    df_total_stats['p+'] = round(df_total_stats['total_tp']/(df_total_stats['total_tp'] + df_total_stats['total_fp']), 4)
+    df_total_stats['re'] = round(
+        df_total_stats['total_tp'] /
+        (df_total_stats['total_tp'] + df_total_stats['total_fn']), 4
+    )
+    df_total_stats['p+'] = round(
+        df_total_stats['total_tp'] /
+        (df_total_stats['total_tp'] + df_total_stats['total_fp']), 4
+    )
     df_total_stats['F1'] = round(
-        2*df_total_stats['re']*df_total_stats['p+']/(df_total_stats['re']+df_total_stats['p+']),
-        4
+        2 * df_total_stats['re'] * df_total_stats['p+'] /
+        (df_total_stats['re'] + df_total_stats['p+']), 4
     )
     df_all = df_all.append(df_total_stats, ignore_index=True)
 
-    
     if output_csv is not None:
         df_all.to_csv(output_csv, index=False)
-
-
-
-

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import stanfordnlp
 import spacy
+from nltk import word_tokenize
 
 
 def combine_entity_types(df, lowercase=True):
@@ -741,13 +742,40 @@ def split_by_space(text):
         yield token, offset, offset + len(token)
         offset += len(token)
 
+def split_by_space_punctuation(text):
+    offset = 0
+    for token in re.findall(r"[\w]+|[^\s\w]", text):
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
+        offset += len(token)
 
-def compute_stats(df, is_token, is_micro):
-    """
+
+def split_by_nltk(text):
+    offset = 0
+    for token in word_tokenize(text):
+        offset = text.find(token, offset)
+        yield token, offset, offset + len(token)
+        offset += len(token)
+
+
+def compute_stats(df, token_eval=True, average='micro', label=None):
+    '''
     Compute se (recall), ppv (precision), f1 score
-    """
-    type_eval = 'n_'
-    if is_token:
+    Args:
+        df: DataFrame, contains stats for each file in dataset
+        token_eval: Bool, token or entity evaultion
+        average: string, ['micro', 'macro']
+        label: string, None (if binary evalution), valid label (if multi evaluation)
+    '''
+    average = average.lower()
+    if average not in ('micro', 'macro'):
+        raise ValueError('Invalid average argument.')
+    if label is not None:
+        type_eval = f'n_{label}_'
+    else:
+        type_eval = 'n_'
+
+    if token_eval:
         type_eval += 'token_'
     else:
         type_eval += 'entity_'
@@ -755,7 +783,7 @@ def compute_stats(df, is_token, is_micro):
     tp = df[type_eval + 'tp']
     fp = df[type_eval + 'fp']
     fn = df[type_eval + 'fn']
-    if is_micro:
+    if average == 'micro':
         tp, fp, fn = tp.sum(), fp.sum(), fn.sum()
     se = tp / (tp + fn)
     ppv = tp / (tp + fp)
@@ -769,7 +797,7 @@ def get_entities(data):
     """
     entities = [
         (
-            data['entity'].iloc[i], data['entity_type'].iloc[i].lower(),
+            data['entity'].iloc[i], data['entity_type'].iloc[i],
             data['start'].iloc[i], data['stop'].iloc[i]
         ) for i in range(len(data))
     ]
