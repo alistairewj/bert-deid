@@ -336,35 +336,22 @@ class Transformer(object):
         # returns a list of the predictions with the token span
         return preds
 
-    """
     def apply(self, text, repl='___'):
-        preds, lengths, offsets = self.predict(text)
+        preds = self.predict(text)
+        if len(preds) == 0:
+            return text
 
-        # get the free-text label
-        labels = [
-            self.label_set.id_to_label[idxMax]
-            for idxMax in preds.argmax(axis=1)
-        ]
+        extend_token = 0
+        for i in reversed(range(len(preds))):
+            start, length = preds[i][2:]
+            # for consecutive entities, only insert a single replacement
+            if i > 0:
+                if (preds[i - 1][2] + preds[i - 1][3]) == start:
+                    extend_token += length
+                    continue
 
-        # merge entities which are adjacent
-        #removed_entities = np.zeros(len(labels), dtype=bool)
-        for i in reversed(range(len(labels))):
-            if i == 0 or labels[i] == 'O':
-                continue
-
-            if labels[i] == labels[i - 1]:
-                offset, length = offsets.pop(i), lengths.pop(i)
-                lengths[i - 1] = offset + length - offsets[i - 1]
-                labels.pop(i)
-
-        #keep_entities = ~removed_entities
-        #labels = [l for i, l in enumerate(labels) if keep_entities[i]]
-        #lengths = lengths[keep_entities]
-        #offsets = offsets[keep_entities]
-        for i in reversed(range(len(labels))):
-            if labels[i] != 'O':
-                # replace this instance of text with three underscores
-                text = text[:offsets[i]] + repl + text[offsets[i] + lengths[i]:]
+            # replace this instance of text with three underscores
+            text = text[:start] + repl + text[start + length + extend_token:]
+            extend_token = 0
 
         return text
-    """
