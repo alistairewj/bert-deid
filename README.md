@@ -16,7 +16,8 @@ To download the model, we have provided a helper script in bert-deid:
 
 ```sh
 # note: MODEL_DIR environment variable used by download
-export MODEL_DIR="~/bert_deid_model/"
+# by default, we download to bert_deid_model in the current directory
+export MODEL_DIR="bert_deid_model"
 bert_deid download
 ```
 
@@ -25,7 +26,7 @@ bert_deid download
 From the command line, we can call `bert_deid` to apply it to any given text:
 
 ```sh
-export MODEL_DIR="~/bert_deid_model/"
+export MODEL_DIR="bert_deid_model"
 bert_deid apply --text "hello dr. somayah"
 ```
 
@@ -48,9 +49,8 @@ The model can also be imported and used directly within Python.
 from bert_deid.model import Transformer
 
 # load in a trained model
-model_type = 'bert'
 model_path = '/data/models/bert-i2b2-2014'
-deid_model = Transformer(model_type, model_path)
+deid_model = Transformer(model_path)
 
 text = 'Dr. Somayah says I have had a pneumothorax since 2019-01-01.'
 print(deid_model.apply(text, repl='___'))
