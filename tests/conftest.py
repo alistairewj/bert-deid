@@ -5,6 +5,7 @@
 # We use environment variables in fixtures.
 # If not present, we use default values.
 import os
+from pathlib import Path
 import pytest
 from bert_deid.model.transformer import Transformer
 
@@ -36,8 +37,9 @@ def bert_i2b2_2014_model():
     """
     model_path = os.getenv('MODEL_DIR')
     if model_path is None:
-        # use default
-        model_path = '/data/models/bert-i2b2-2014'
+        # default to the bundled test model in this repo
+        repo_root = Path(__file__).resolve().parents[1]
+        model_path = str(repo_root / 'models' / 'i2b2_2014')
 
     transformer = Transformer(model_path, device='cpu')
     return transformer

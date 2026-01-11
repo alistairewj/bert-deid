@@ -20,6 +20,7 @@ from transformers import (
     AutoConfig,
     AutoModelForTokenClassification,
     AutoTokenizer,
+    BertConfig,
     set_seed,
 )
 
@@ -76,13 +77,40 @@ class Transformer(object):
             data_dir='', label_set=label_set
         )
 
+        # label mapping for token classification head
+        label_list = list(label_set.label_list)
+        id2label = {i: l for i, l in enumerate(label_list)}
+        label2id = {l: i for i, l in enumerate(label_list)}
+
         # Load pretrained model and tokenizer
-        self.config = AutoConfig.from_pretrained(model_path)
+        # Some bundled/legacy checkpoints may not include config.json.
+        config_path = os.path.join(model_path, 'config.json')
+        if os.path.exists(config_path):
+            self.config = AutoConfig.from_pretrained(model_path)
+        else:
+            # Default to a BERT-base checkpoint with an 8-way token classification head.
+            self.config = BertConfig(
+                vocab_size=30522,
+                hidden_size=768,
+                num_hidden_layers=12,
+                num_attention_heads=12,
+                intermediate_size=3072,
+                max_position_embeddings=512,
+                type_vocab_size=2,
+            )
+            self.config.id2label = id2label
+            self.config.label2id = label2id
+            self.config.num_labels = len(label_list)
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             # we always use fast tokenizers as we need offsets from tokenization
             use_fast=True,
         )
+        # ensure config has correct label mapping even when loaded from disk
+        # (older configs may have different defaults)
+        self.config.id2label = dict(getattr(self.config, 'id2label', {})) or id2label
+        self.config.label2id = dict(getattr(self.config, 'label2id', {})) or label2id
+        self.config.num_labels = int(getattr(self.config, 'num_labels', 0) or len(label_list))
         self.model = AutoModelForTokenClassification.from_pretrained(
             model_path,
             from_tf=False,
@@ -106,6 +134,58 @@ class Transformer(object):
         # CPU probably faster, avoids overhead
         self.device = torch.device(device)
         self.model.to(self.device)
+
+        # determine the maximum sequence length we should pad/truncate to
+        # prefer the model's max position embeddings to avoid "infinite" tokenizer limits
+        try:
+            tokenizer_max = int(getattr(self.tokenizer, 'model_max_length', 0) or 0)
+        except Exception:
+            tokenizer_max = 0
+        model_max = int(getattr(self.config, 'max_position_embeddings', 0) or 0)
+        if tokenizer_max > 0 and model_max > 0:
+            self.max_seq_length = min(tokenizer_max, model_max)
+        elif model_max > 0:
+            self.max_seq_length = model_max
+        elif tokenizer_max > 0:
+            self.max_seq_length = tokenizer_max
+
+    def _pad_to_max_seq_length(
+        self,
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        offsets,
+        lengths,
+        subword_flags,
+    ):
+        """Pad (or truncate) a single-tokenized sequence to self.max_seq_length."""
+
+        pad_token_id = self.tokenizer.pad_token_id
+        if pad_token_id is None:
+            # BERT-style tokenizers generally use 0; fall back if missing.
+            pad_token_id = 0
+
+        max_len = int(self.max_seq_length)
+
+        input_ids = list(input_ids)[:max_len]
+        attention_mask = list(attention_mask)[:max_len]
+        token_type_ids = list(token_type_ids)[:max_len]
+        offsets = list(offsets)[:max_len]
+        lengths = list(lengths)[:max_len]
+        subword_flags = list(subword_flags)[:max_len]
+
+        pad_len = max_len - len(input_ids)
+        if pad_len <= 0:
+            return input_ids, attention_mask, token_type_ids, offsets, lengths, subword_flags
+
+        input_ids.extend([pad_token_id] * pad_len)
+        attention_mask.extend([0] * pad_len)
+        token_type_ids.extend([0] * pad_len)
+        offsets.extend([0] * pad_len)
+        lengths.extend([0] * pad_len)
+        subword_flags.extend([False] * pad_len)
+
+        return input_ids, attention_mask, token_type_ids, offsets, lengths, subword_flags
 
     def split_by_overlap(self, text, token_step_size=20, sequence_length=100):
         # track offsets in tokenization
@@ -159,13 +239,22 @@ class Transformer(object):
         encoded = self.tokenizer._tokenizer.encode(
             text, add_special_tokens=False
         )
-        token_sw = [False] + [
-            encoded.words[i + 1] == encoded.words[i]
-            for i in range(len(encoded.words) - 1)
-        ]
+        word_ids = list(encoded.word_ids)
+        token_sw = [False]
+        if len(word_ids) > 1:
+            token_sw.extend(
+                [
+                    (word_ids[i + 1] is not None)
+                    and (word_ids[i] is not None)
+                    and (word_ids[i + 1] == word_ids[i])
+                    for i in range(len(word_ids) - 1)
+                ]
+            )
         token_offsets = np.array(encoded.offsets)
 
-        seq_len = self.tokenizer.max_len_single_sentence
+        # max tokens available for the "sentence" content, excluding special tokens
+        special_tokens = int(self.tokenizer.num_special_tokens_to_add(pair=False))
+        seq_len = int(self.max_seq_length) - special_tokens
         if feature_overlap is None:
             feature_overlap = 0
         # identify the starting offsets for each sub-sequence
@@ -191,24 +280,52 @@ class Transformer(object):
 
             text_subseq = text[token_offsets[start, 0]:token_offsets[stop, 0]]
             encoded = self.tokenizer._tokenizer.encode(text_subseq)
-            encoded.pad(self.tokenizer.model_max_length)
 
-            subseq_sw = [False] + [
-                encoded.words[i + 1] == encoded.words[i]
-                for i in range(len(encoded.words) - 1)
-            ]
+            # Build explicit attention mask then pad/truncate to max length.
+            input_ids = encoded.ids
+            token_type_ids = encoded.type_ids
+            attention_mask = [1] * len(input_ids)
+
+            subseq_sw = [False]
+            subseq_word_ids = list(encoded.word_ids)
+            if len(subseq_word_ids) > 1:
+                subseq_sw.extend(
+                    [
+                        (subseq_word_ids[i + 1] is not None)
+                        and (subseq_word_ids[i] is not None)
+                        and (subseq_word_ids[i + 1] == subseq_word_ids[i])
+                        for i in range(len(subseq_word_ids) - 1)
+                    ]
+                )
+
+            offsets = [o[0] + token_offsets[start, 0] for o in encoded.offsets]
+            lengths = [o[1] - o[0] for o in encoded.offsets]
+
+            (
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                offsets,
+                lengths,
+                subseq_sw,
+            ) = self._pad_to_max_seq_length(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                offsets=offsets,
+                lengths=lengths,
+                subword_flags=subseq_sw,
+            )
 
             inputs.append(
                 InputFeatures(
-                    input_ids=encoded.ids,
-                    attention_mask=encoded.attention_mask,
-                    token_type_ids=encoded.type_ids,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
                     input_subwords=subseq_sw,
                     # note the offsets are based off the original text, not the subseq
-                    offsets=[
-                        o[0] + token_offsets[start, 0] for o in encoded.offsets
-                    ],
-                    lengths=[o[1] - o[0] for o in encoded.offsets]
+                    offsets=offsets,
+                    lengths=lengths,
                 )
             )
 
@@ -324,11 +441,12 @@ class Transformer(object):
         token_type_ids = token_type_ids.to(self.model.device)
 
         with torch.no_grad():
-            logits = self.model(
+            outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                token_type_ids=token_type_ids
-            )[0]
+                token_type_ids=token_type_ids,
+            )
+            logits = outputs.logits
 
         logits = logits.detach().cpu().numpy()
         preds = self._logits_to_standoff(logits, inputs, ignore_label='O')
