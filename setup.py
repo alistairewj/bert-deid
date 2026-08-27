@@ -20,7 +20,7 @@ setuptools.setup(
         'pandas>=2.1',
         'tqdm>=4.66',
         'regex>=2023.12.25',
-        'torch==2.9.0',
+        'torch==2.13.0',
         'transformers>=4.40.0',
         'tokenizers>=0.19.0',
     ],
